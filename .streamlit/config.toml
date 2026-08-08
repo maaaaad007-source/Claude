@@ -1,0 +1,9 @@
+[theme]
+base = "light"
+primaryColor = "#0a66c2"
+
+[server]
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
