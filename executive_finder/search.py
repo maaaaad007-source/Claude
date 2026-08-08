@@ -7,6 +7,7 @@ into ``SearchResult`` records with tracking redirects stripped.
 
 from __future__ import annotations
 
+import base64
 import os
 import random
 import re
@@ -131,6 +132,26 @@ def build_query(
 # --------------------------------------------------------------------------- #
 # URL handling
 # --------------------------------------------------------------------------- #
+def _decode_bing_target(value: str) -> str:
+    """Decode Bing's ``u=a1<base64url>`` redirect parameter.
+
+    Bing routes every organic result through ``/ck/a?…&u=a1<base64url>``.
+    Left encoded, the href never looks like a LinkedIn profile and the whole
+    result set is discarded as off-site.
+    """
+    if not value:
+        return ""
+    payload = value[2:] if value[:2] in ("a1", "a2") else value
+    try:
+        # base64url, stripped of padding by Bing — restore it before decoding.
+        decoded = base64.urlsafe_b64decode(
+            payload + "=" * (-len(payload) % 4)
+        ).decode("utf-8", "replace")
+    except Exception:
+        return ""
+    return decoded if decoded.startswith(("http://", "https://")) else ""
+
+
 def unwrap_redirect(href: str) -> str:
     """Strip search-engine tracking redirects from a result href.
 
@@ -153,6 +174,10 @@ def unwrap_redirect(href: str) -> str:
         return unquote(query["uddg"][0])
     if "google." in host and parsed.path == "/url" and "q" in query:
         return unquote(query["q"][0])
+    if "bing.com" in host and "u" in query:
+        decoded = _decode_bing_target(query["u"][0])
+        if decoded:
+            return decoded
     for key in ("url", "u", "r"):
         if key in query and query[key][0].startswith(("http://", "https://")):
             return unquote(query[key][0])
@@ -363,12 +388,22 @@ def looks_blocked(html: str) -> bool:
 _API_KEYS: Dict[str, str] = {}
 
 
+def _clean_key(value: str) -> str:
+    """Strip whitespace and stray quote characters from a pasted credential.
+
+    Keys copied out of a chat or a TOML snippet often arrive wrapped in
+    quotes — including the curly variants a phone keyboard inserts — which
+    otherwise reach the API verbatim and are rejected.
+    """
+    return (value or "").strip().strip("\"'‘’“”").strip()
+
+
 def configure_api_keys(serper: str = "", brave: str = "") -> None:
     """Register search API credentials for this process."""
     if serper:
-        _API_KEYS["serper"] = serper.strip()
+        _API_KEYS["serper"] = _clean_key(serper)
     if brave:
-        _API_KEYS["brave"] = brave.strip()
+        _API_KEYS["brave"] = _clean_key(brave)
 
 
 def api_key(name: str) -> str:
@@ -376,17 +411,28 @@ def api_key(name: str) -> str:
     return _API_KEYS.get(name) or os.environ.get("{}_API_KEY".format(name.upper()), "")
 
 
+def _raise_for_api_status(response, provider: str) -> None:
+    """Raise with the API's own error body, which explains far more than a code."""
+    if response.ok:
+        return
+    body = (response.text or "").strip()[:200]
+    raise SearchError(
+        "{} HTTP {}: {}".format(provider, response.status_code, body or "no body")
+    )
+
+
 def _fetch_serper(session: requests.Session, query: str, timeout: float) -> List[SearchResult]:
     key = api_key("serper")
     if not key:
         raise SearchError("no Serper API key configured")
+    # Minimal documented body — extra parameters are the usual cause of a 400.
     response = session.post(
         SERPER_ENDPOINT,
-        json={"q": query, "num": 20},
+        json={"q": query},
         headers={"X-API-KEY": key, "Content-Type": "application/json"},
         timeout=timeout,
     )
-    response.raise_for_status()
+    _raise_for_api_status(response, "serper")
     payload = response.json()
     return [
         SearchResult(
@@ -408,7 +454,7 @@ def _fetch_brave(session: requests.Session, query: str, timeout: float) -> List[
         headers={"X-Subscription-Token": key, "Accept": "application/json"},
         timeout=timeout,
     )
-    response.raise_for_status()
+    _raise_for_api_status(response, "brave")
     payload = response.json()
     return [
         SearchResult(

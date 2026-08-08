@@ -258,3 +258,83 @@ def test_keyed_provider_is_attempted_before_scrapers(monkeypatch):
         search_detailed("anything", pause=0)
     # Brave has no key, so it is skipped without a network attempt.
     assert order == ["serper", "duckduckgo"]
+
+
+# --------------------------------------------------------------------------- #
+# Bing base64 redirects — the cause of "dropped N non-profile"
+# --------------------------------------------------------------------------- #
+import base64  # noqa: E402
+
+from executive_finder.search import is_linkedin_profile, unwrap_redirect  # noqa: E402
+
+
+def _bing_ck(target: str, prefix: str = "a1") -> str:
+    encoded = base64.urlsafe_b64encode(target.encode()).decode().rstrip("=")
+    return "https://www.bing.com/ck/a?!&&p=deadbeef&u={}{}&ntb=1".format(prefix, encoded)
+
+
+@pytest.mark.parametrize("prefix", ["a1", "a2"])
+def test_bing_redirect_is_decoded(prefix):
+    target = "https://se.linkedin.com/in/jim-rowan"
+    assert unwrap_redirect(_bing_ck(target, prefix)) == target
+
+
+def test_decoded_bing_redirect_is_recognised_as_a_profile():
+    """The exact failure seen in production: every row dropped as non-profile."""
+    wrapped = _bing_ck("https://se.linkedin.com/in/jim-rowan")
+    assert not is_linkedin_profile(wrapped)
+    assert is_linkedin_profile(unwrap_redirect(wrapped))
+
+
+def test_bing_redirect_with_undecodable_payload_is_left_alone():
+    href = "https://www.bing.com/ck/a?u=a1!!!not-base64!!!"
+    assert unwrap_redirect(href) == href
+
+
+def test_bing_direct_urls_still_pass_through():
+    direct = "https://se.linkedin.com/in/jim-rowan"
+    assert unwrap_redirect(direct) == direct
+
+
+def test_bing_serp_with_redirects_yields_usable_profiles():
+    from executive_finder.search import parse_bing
+
+    html = """
+    <li class="b_algo"><h2><a href="{}">
+      Jim Rowan - Chief Executive Officer - Volvo Cars | LinkedIn</a></h2>
+      <p>Volvo Cars, Gothenburg, Sweden</p></li>
+    """.format(_bing_ck("https://se.linkedin.com/in/jim-rowan"))
+
+    results = parse_bing(html)
+    assert results[0].url == "https://se.linkedin.com/in/jim-rowan"
+    assert is_linkedin_profile(results[0].url)
+
+
+# --------------------------------------------------------------------------- #
+# API error reporting and key hygiene
+# --------------------------------------------------------------------------- #
+def test_api_error_includes_the_response_body(monkeypatch):
+    class FakeResponse:
+        ok = False
+        status_code = 400
+        text = '{"message":"Not enough credits"}'
+
+    monkeypatch.setattr(search_mod, "_API_KEYS", {"serper": "k"})
+    monkeypatch.setattr(
+        search_mod.requests.Session, "post", lambda *a, **k: FakeResponse()
+    )
+
+    with pytest.raises(SearchError) as excinfo:
+        search_mod._fetch_serper(search_mod.requests.Session(), "q", 5.0)
+    assert "Not enough credits" in str(excinfo.value)
+    assert "400" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    ['"abc123"', "'abc123'", "“abc123”", "  abc123  ", "‘abc123’"],
+)
+def test_pasted_keys_are_stripped_of_quotes(monkeypatch, pasted):
+    monkeypatch.setattr(search_mod, "_API_KEYS", {})
+    search_mod.configure_api_keys(serper=pasted)
+    assert search_mod.api_key("serper") == "abc123"
