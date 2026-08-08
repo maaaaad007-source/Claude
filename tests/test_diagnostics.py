@@ -223,3 +223,38 @@ def test_parse_mojeek():
     assert len(results) == 1
     assert results[0].title == "Daniel Ek - CEO - Spotify | LinkedIn"
     assert results[0].snippet == "Spotify, Stockholm"
+
+
+def test_search_error_carries_provider_outcomes(monkeypatch):
+    blocked = Provider("b1", lambda s, q, t: "<html>captcha</html>", lambda h: [])
+    monkeypatch.setattr(search_mod, "PROVIDERS", (blocked,))
+
+    with pytest.raises(SearchError) as excinfo:
+        search_detailed("anything", pause=0)
+    outcomes = getattr(excinfo.value, "outcomes", [])
+    assert [o.name for o in outcomes] == ["b1"]
+    assert outcomes[0].status == "blocked"
+
+
+def test_keyed_provider_is_attempted_before_scrapers(monkeypatch):
+    order = []
+
+    def record(name):
+        def fetch(session, query, timeout):
+            order.append(name)
+            raise OSError("offline")
+        return fetch
+
+    monkeypatch.setattr(search_mod, "_API_KEYS", {"serper": "k"})
+    providers = (
+        Provider("serper", record("serper"), None, needs_key="serper"),
+        Provider("brave", record("brave"), None, needs_key="brave"),
+        Provider("duckduckgo", record("duckduckgo"), lambda h: []),
+    )
+    monkeypatch.setattr(search_mod, "PROVIDERS", providers)
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+    with pytest.raises(SearchError):
+        search_detailed("anything", pause=0)
+    # Brave has no key, so it is skipped without a network attempt.
+    assert order == ["serper", "duckduckgo"]

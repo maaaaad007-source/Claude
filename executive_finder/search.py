@@ -521,10 +521,14 @@ def search_detailed(
         )
 
     if not any(o.status in ("ok", "empty") for o in outcomes):
-        raise SearchError(
+        error = SearchError(
             "no search provider returned results -> "
             + "; ".join(str(o) for o in outcomes)
         )
+        # Carry the per-provider records on the exception so a caller that
+        # recovers from one failed category still keeps its diagnostics.
+        error.outcomes = outcomes
+        raise error
     return [], outcomes
 
 
