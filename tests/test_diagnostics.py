@@ -132,7 +132,8 @@ def test_pipeline_recovers_from_a_domain_in_the_company_field(monkeypatch):
     monkeypatch.setattr(pipeline.time, "sleep", lambda *_: None)
 
     contacts = pipeline.find_contacts(
-        "Spotify.com", categories=["CEO / Executive"], pause=0
+        "Spotify.com", categories=["CEO / Executive"], pause=0,
+        discover_patterns=False,
     )
     # The query searches the company, not the domain string.
     assert '"Spotify"' in captured["query"]

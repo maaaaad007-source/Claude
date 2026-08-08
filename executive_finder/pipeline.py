@@ -24,6 +24,7 @@ from .enrichment import (
     resolve_email,
 )
 from .geo import country_match, known_country
+from .patterns import discover_pattern
 from .parsing import parse_title
 from .search import (
     ProviderOutcome,
@@ -98,7 +99,9 @@ class SearchReport:
     emails_observed: int = 0
     emails_guessed: int = 0
     company_pattern: str = ""
+    discovered_pattern: str = ""
     enrichment_note: str = ""
+    pattern_note: str = ""
 
     @property
     def blocked(self) -> bool:
@@ -241,6 +244,7 @@ def _enrich_emails(
     session: Optional[requests.Session],
     report: SearchReport,
     progress: Optional[ProgressHook] = None,
+    discover_patterns: bool = True,
 ) -> List[Contact]:
     """Replace guessed addresses with observed ones wherever Hunter has them.
 
@@ -253,18 +257,46 @@ def _enrich_emails(
     if not contacts or not domain:
         return contacts
 
+    names = [contact.full_name for contact in contacts]
+
+    # Free step: mine published addresses for the company's real shape. This
+    # runs with or without a Hunter key, because knowing the pattern fixes
+    # every guessed row at once.
+    discovered = ""
+    if discover_patterns:
+        if progress:
+            progress("Looking for published addresses…", 0.9)
+        report.queries.append('"@{}"'.format(domain))
+        found = discover_pattern(
+            domain, search_detailed, known_names=names, session=session
+        )
+        report.pattern_note = found.describe()
+        if found.samples:
+            report.pattern_note += " (samples: {})".format(
+                ", ".join(s + "@" + domain for s in found.samples[:3])
+            )
+        if found.usable:
+            discovered = found.template
+            report.discovered_pattern = found.template
+
+    client: Optional[HunterClient] = None
+    profile: Optional[DomainProfile] = None
+
     if not hunter_key:
         report.enrichment_note = (
-            "No Hunter API key — every address is a pattern guess."
+            "No Hunter API key — addresses are pattern guesses"
+            + (" using the inferred pattern {}.".format(discovered)
+               if discovered else " using the default pattern.")
         )
-        report.emails_guessed = len(contacts)
-        return contacts
+        return _apply_emails(
+            contacts, domain, fallback_pattern, None, None, False,
+            discovered, report,
+        )
 
     if progress:
         progress("Looking up real email addresses…", 0.95)
 
     client = HunterClient(hunter_key, session=session)
-    profile: Optional[DomainProfile] = None
     try:
         profile = client.domain_search(domain)
         report.company_pattern = profile.pattern
@@ -278,6 +310,23 @@ def _enrich_emails(
     except HunterError as exc:
         report.enrichment_note = "Hunter lookup failed: {}".format(exc)
 
+    return _apply_emails(
+        contacts, domain, fallback_pattern, profile, client, use_finder,
+        discovered, report,
+    )
+
+
+def _apply_emails(
+    contacts: List[Contact],
+    domain: str,
+    fallback_pattern: str,
+    profile: Optional[DomainProfile],
+    client: Optional[HunterClient],
+    use_finder: bool,
+    discovered_pattern: str,
+    report: SearchReport,
+) -> List[Contact]:
+    """Attach the best available address to each contact."""
     enriched: List[Contact] = []
     for contact in contacts:
         result = resolve_email(
@@ -287,6 +336,7 @@ def _enrich_emails(
             client=client,
             use_finder=use_finder,
             fallback_pattern=fallback_pattern,
+            discovered_pattern=discovered_pattern,
         )
         if result is None:
             enriched.append(contact)
@@ -323,6 +373,7 @@ def find_contacts_detailed(
     country_filter: str = "strict",
     hunter_key: str = "",
     use_email_finder: bool = False,
+    discover_patterns: bool = True,
     pause: float = 1.5,
     session: Optional[requests.Session] = None,
     progress: Optional[ProgressHook] = None,
@@ -406,7 +457,7 @@ def find_contacts_detailed(
 
     contacts = _enrich_emails(
         contacts, mail_domain, email_pattern, hunter_key, use_email_finder,
-        session, report, progress,
+        session, report, progress, discover_patterns,
     )
 
     order = {category: i for i, category in enumerate(roles.CATEGORIES)}

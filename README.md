@@ -70,6 +70,7 @@ executive_finder/
 ├── parsing.py                Title & link unpackaging
 ├── emails.py                 Name sanitisation and email generation
 ├── enrichment.py             Real email lookup via Hunter.io
+├── patterns.py               Free pattern inference from published addresses
 ├── geo.py                    Country matching (locale, country and city evidence)
 └── pipeline.py               Orchestration, filtering, de-duplication
 tests/                        Unit tests (pytest)
@@ -118,10 +119,11 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-131 tests cover query construction, redirect unwrapping (including Bing's
+152 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
-classification and the end-to-end pipeline (with the network stubbed).
+classification, free pattern inference and the end-to-end pipeline (with the
+network stubbed).
 
 ## Deployment — Streamlit Community Cloud
 
@@ -164,9 +166,43 @@ variables when not running under Streamlit.
 
 ## Real email addresses
 
-Without a Hunter.io key every address is a **pattern guess** — `first.last@…` or
-whichever shape you pick — which is simply wrong whenever the company uses a
-different convention, and says nothing about whether the mailbox exists.
+Addresses are resolved in four tiers, best first. The **Email Source** column
+always states which tier produced a given address.
+
+| Tier | Source | Needs |
+| :--- | :--- | :--- |
+| 1 | `Verified — Hunter directory` — Hunter has this exact address | Hunter key |
+| 2 | `Found — Hunter lookup` — per-person resolution | Hunter key, opt-in |
+| 3 | `Guess — company's own pattern` — Hunter reported the company's shape | Hunter key |
+| 4 | `Guess — pattern inferred from public addresses` — mined for free | nothing |
+| 5 | `Guess — default pattern` — nothing better was available | nothing |
+
+### Free pattern discovery (no API key)
+
+The single most valuable fact is the company's *shape*: knowing Volvo Cars uses
+`{f}{last}` fixes every row at once, whereas assuming `first.last` gets every
+row wrong. That can usually be recovered without paying anyone.
+
+One extra search per run (`"@volvocars.com"`) harvests addresses the company has
+published — press pages, job ads, `mailto:` links — and votes on the shape:
+
+* **Direct evidence.** If a harvested address is reproduced by applying a
+  candidate template to an executive we already found, that is proof. It is the
+  only way to tell `jrowan` (`{f}{last}`) from `jimr` (`{first}{l}`).
+* **Structural evidence.** Failing that, separators still distinguish
+  `jim.rowan` from `j.rowan`.
+* Shared mailboxes (`info@`, `press@`, `careers@`, and suffixed variants like
+  `info-uk@`) are excluded — they carry no naming information.
+
+This is inference, not verification: a company with several patterns or
+addresses on acquired domains will defeat it. The row stays labelled a guess.
+
+Toggle it in the sidebar under **Email lookup**.
+
+### Hunter.io (paid tiers give observed addresses)
+
+Without a Hunter.io key every address is a **pattern guess**, and says nothing
+about whether the mailbox exists.
 
 Add a [Hunter.io](https://hunter.io) key (sidebar → **Email lookup**, or
 `HUNTER_API_KEY` in Secrets) and the app resolves addresses instead:
@@ -181,8 +217,9 @@ Add a [Hunter.io](https://hunter.io) key (sidebar → **Email lookup**, or
    the remainder via `email-finder`. It costs one Hunter credit per person, so
    it is off by default.
 
-The **Email Source** column always states which of these produced the address.
-Hunter's free tier is 25 searches a month, and step 1 spends one per run.
+Hunter's free tier is small (check their pricing page for the current figure)
+and step 1 spends one search per run, so free pattern discovery above is what
+keeps the app useful without a subscription.
 
 ## Troubleshooting
 

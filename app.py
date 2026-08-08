@@ -75,6 +75,7 @@ def _cached_search(
     country_filter: str,
     hunter_key: str,
     use_email_finder: bool,
+    discover_patterns: bool,
     _progress=None,
 ):
     """Run the pipeline behind a one-hour cache keyed on the search inputs.
@@ -95,6 +96,7 @@ def _cached_search(
         country_filter=country_filter,
         hunter_key=hunter_key,
         use_email_finder=use_email_finder,
+        discover_patterns=discover_patterns,
         progress=_progress,
     )
     return contacts_to_records(contacts), report
@@ -141,6 +143,8 @@ def _render_diagnostics(report, expanded: bool = False) -> None:
         st.caption(report.summary())
         if report.enrichment_note:
             st.caption("**Email lookup:** " + report.enrichment_note)
+        if report.pattern_note:
+            st.caption("**Pattern discovery:** " + report.pattern_note)
 
         if report.outcomes:
             st.write("**Search providers**")
@@ -237,6 +241,13 @@ def main() -> None:
             st.session_state.get("hunter_api_key", "").strip()
             or st.session_state.get("secrets_hunter_key", "")
         )
+        discover_patterns = st.checkbox(
+            "Infer the pattern from published addresses",
+            value=True,
+            help="Free. Searches for addresses the company has published and "
+                 "derives its real pattern, which fixes every guessed row at "
+                 "once. Costs one extra search query per run.",
+        )
         use_email_finder = st.checkbox(
             "Look up each person individually",
             value=False,
@@ -249,8 +260,9 @@ def main() -> None:
                        icon="✅")
         else:
             st.caption(
-                "Without a Hunter key every address is a **pattern guess**, "
-                "which is wrong whenever the company uses a different pattern."
+                "Without a Hunter key addresses are **guesses**. Pattern "
+                "discovery below makes those guesses follow the company's own "
+                "convention rather than an assumed one."
             )
             email_pattern = st.selectbox(
                 "Guess pattern",
@@ -335,6 +347,7 @@ def main() -> None:
                 country_filter,
                 hunter_key,
                 use_email_finder,
+                discover_patterns,
                 _progress=progress,
             )
         except SearchError as exc:

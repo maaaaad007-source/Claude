@@ -38,6 +38,7 @@ EMAIL_FINDER_ENDPOINT = "https://api.hunter.io/v2/email-finder"
 SOURCE_DIRECTORY = "directory"
 SOURCE_FINDER = "finder"
 SOURCE_COMPANY_PATTERN = "company-pattern"
+SOURCE_DISCOVERED_PATTERN = "discovered-pattern"
 SOURCE_GUESS = "guess"
 
 
@@ -67,6 +68,8 @@ class EmailResult:
             base = "Found — Hunter lookup"
         elif self.source == SOURCE_COMPANY_PATTERN:
             base = "Guess — company's own pattern"
+        elif self.source == SOURCE_DISCOVERED_PATTERN:
+            base = "Guess — pattern inferred from public addresses"
         else:
             base = "Guess — default pattern"
         parts = [base]
@@ -188,6 +191,7 @@ def resolve_email(
     client: Optional[HunterClient] = None,
     use_finder: bool = False,
     fallback_pattern: str = "first.last",
+    discovered_pattern: str = "",
 ) -> Optional[EmailResult]:
     """Best available address for one person, with its provenance.
 
@@ -216,6 +220,12 @@ def resolve_email(
         guess = build_email(full_name, domain, company_pattern)
         if guess:
             return EmailResult(guess, SOURCE_COMPANY_PATTERN)
+
+    # A pattern mined from published addresses beats an assumed default.
+    if discovered_pattern:
+        guess = build_email(full_name, domain, discovered_pattern)
+        if guess:
+            return EmailResult(guess, SOURCE_DISCOVERED_PATTERN)
 
     guess = build_email(full_name, domain, fallback_pattern)
     return EmailResult(guess, SOURCE_GUESS) if guess else None

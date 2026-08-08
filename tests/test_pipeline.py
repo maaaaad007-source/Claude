@@ -45,7 +45,7 @@ def test_find_contacts_builds_the_six_column_matrix(monkeypatch):
 
     contacts = pipeline.find_contacts(
         "Spotify", domain="spotify.com", country="Sweden",
-        categories=["CEO / Executive"], pause=0,
+        categories=["CEO / Executive"], pause=0, discover_patterns=False,
     )
 
     rows = pipeline.contacts_to_records(contacts)
@@ -80,7 +80,8 @@ def test_results_are_deduplicated_across_categories(monkeypatch):
     monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts(
-        "Spotify", categories=["CEO / Executive", "Design Director"], pause=0
+        "Spotify", categories=["CEO / Executive", "Design Director"], pause=0,
+        discover_patterns=False,
     )
     assert len(calls["queries"]) == 2
     assert len(contacts) == 1
