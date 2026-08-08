@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from executive_finder import (
+    __version__,
     CATEGORIES,
     COLUMNS,
     EMAIL_PATTERNS,
@@ -227,6 +228,9 @@ def main() -> None:
             "verified. Confirm before outreach and follow GDPR/CAN-SPAM rules "
             "in your market."
         )
+        # Build stamp: makes a stale deployment obvious at a glance instead of
+        # leaving "my fix isn't there" as a guess.
+        st.caption("Build v{}".format(__version__))
 
     if not submitted:
         st.info("Enter a company name above and run the extraction to begin.")
