@@ -45,6 +45,8 @@ def _load_api_keys() -> None:
             return ""
 
     configure_api_keys(serper=_secret("SERPER_API_KEY"), brave=_secret("BRAVE_API_KEY"))
+    if _secret("HUNTER_API_KEY"):
+        st.session_state.setdefault("secrets_hunter_key", _secret("HUNTER_API_KEY"))
 
 
 def _apply_session_key() -> None:
@@ -70,6 +72,9 @@ def _cached_search(
     max_per_category: int,
     require_company: bool,
     has_api_key: bool,
+    country_filter: str,
+    hunter_key: str,
+    use_email_finder: bool,
     _progress=None,
 ):
     """Run the pipeline behind a one-hour cache keyed on the search inputs.
@@ -87,6 +92,9 @@ def _cached_search(
         email_pattern=email_pattern,
         max_per_category=max_per_category,
         require_company=require_company,
+        country_filter=country_filter,
+        hunter_key=hunter_key,
+        use_email_finder=use_email_finder,
         progress=_progress,
     )
     return contacts_to_records(contacts), report
@@ -131,6 +139,8 @@ def _render_diagnostics(report, expanded: bool = False) -> None:
     """Show what each provider did and where the rows went."""
     with st.expander("Run diagnostics", expanded=expanded):
         st.caption(report.summary())
+        if report.enrichment_note:
+            st.caption("**Email lookup:** " + report.enrichment_note)
 
         if report.outcomes:
             st.write("**Search providers**")
@@ -191,17 +201,67 @@ def main() -> None:
             "Role categories", CATEGORIES, default=CATEGORIES,
         )
         max_per_category = st.slider("Max results per category", 1, 25, 10)
-        email_pattern = st.selectbox(
-            "Email pattern",
-            list(EMAIL_PATTERNS),
-            index=list(EMAIL_PATTERNS).index(DEFAULT_PATTERN),
-            help="Corporate address syntax used to predict the email.",
-        )
         require_company = st.checkbox(
             "Only keep results that name the company",
             value=False,
             help="Stricter filter — fewer rows, less noise.",
         )
+
+        st.divider()
+        st.subheader("Country filter")
+        country_filter = st.radio(
+            "How strictly to enforce the country",
+            options=["strict", "relaxed", "off"],
+            index=0,
+            format_func=lambda mode: {
+                "strict": "Strict — must show country evidence",
+                "relaxed": "Relaxed — drop only clear mismatches",
+                "off": "Off — keep every market",
+            }[mode],
+            help="The country in the query is only a ranking hint, so results "
+                 "from other markets leak through. This filters on the LinkedIn "
+                 "locale subdomain plus country and city mentions.",
+        )
+
+        st.divider()
+        st.subheader("Email lookup")
+        st.text_input(
+            "Hunter.io API key",
+            key="hunter_api_key",
+            type="password",
+            placeholder="paste key here",
+            help="Optional. Returns real, verified addresses instead of guesses. "
+                 "Held for this browser session only.",
+        )
+        hunter_key = (
+            st.session_state.get("hunter_api_key", "").strip()
+            or st.session_state.get("secrets_hunter_key", "")
+        )
+        use_email_finder = st.checkbox(
+            "Look up each person individually",
+            value=False,
+            disabled=not hunter_key,
+            help="Slower and spends one Hunter credit per person, but resolves "
+                 "executives the bulk domain search did not already cover.",
+        )
+        if hunter_key:
+            st.success("Hunter key active — real addresses where available.",
+                       icon="✅")
+        else:
+            st.caption(
+                "Without a Hunter key every address is a **pattern guess**, "
+                "which is wrong whenever the company uses a different pattern."
+            )
+            email_pattern = st.selectbox(
+                "Guess pattern",
+                list(EMAIL_PATTERNS),
+                index=list(EMAIL_PATTERNS).index(DEFAULT_PATTERN),
+                help="Address shape assumed when no real address can be found.",
+            )
+
+        if hunter_key:
+            email_pattern = DEFAULT_PATTERN
+
         st.divider()
         st.subheader("Search API key")
         st.text_input(
@@ -272,6 +332,9 @@ def main() -> None:
                 max_per_category,
                 require_company,
                 bool(api_key("serper") or api_key("brave")),
+                country_filter,
+                hunter_key,
+                use_email_finder,
                 _progress=progress,
             )
         except SearchError as exc:
@@ -320,10 +383,23 @@ def main() -> None:
     frame = pd.DataFrame(records, columns=COLUMNS)
 
     resolved_domain = normalise_domain(resolved_input_domain, resolved_company)
-    top, mid, tail = st.columns(3)
-    top.metric("Contacts found", len(frame))
-    mid.metric("Categories covered", frame["Category"].nunique())
-    tail.metric("Email domain", resolved_domain or "—")
+    first, second, third, fourth = st.columns(4)
+    first.metric("Contacts found", len(frame))
+    second.metric("Categories covered", frame["Category"].nunique())
+    third.metric(
+        "Real addresses",
+        "{} of {}".format(report.emails_observed, len(frame)),
+        help="Addresses Hunter actually observed, as opposed to pattern guesses.",
+    )
+    fourth.metric("Email domain", resolved_domain or "—")
+
+    if report.dropped_wrong_country:
+        st.caption(
+            "Country filter removed {} result(s) from other markets. "
+            "Relax it in the sidebar if you expected more.".format(
+                report.dropped_wrong_country
+            )
+        )
 
     st.dataframe(
         frame,
@@ -334,6 +410,12 @@ def main() -> None:
                 "LinkedIn Profile", display_text="Open Profile"
             ),
             "Designation": st.column_config.TextColumn("Designation", width="large"),
+            "Email Source": st.column_config.TextColumn(
+                "Email Source",
+                width="medium",
+                help="Verified/Found = observed by Hunter. Guess = derived from "
+                     "a naming pattern and not confirmed to exist.",
+            ),
         },
     )
 

@@ -15,6 +15,15 @@ import requests
 
 from . import roles
 from .emails import DEFAULT_PATTERN, build_email, normalise_domain, sanitize_name
+from .enrichment import (
+    DomainProfile,
+    HunterClient,
+    HunterError,
+    SOURCE_DIRECTORY,
+    SOURCE_FINDER,
+    resolve_email,
+)
+from .geo import country_match, known_country
 from .parsing import parse_title
 from .search import (
     ProviderOutcome,
@@ -39,7 +48,8 @@ __all__ = [
 COLUMNS = [
     "Full Name",
     "Designation",
-    "Estimated Email",
+    "Email",
+    "Email Source",
     "Country",
     "Category",
     "LinkedIn Profile",
@@ -58,12 +68,14 @@ class Contact:
     country: str
     category: str
     linkedin_profile: str
+    email_source: str = "Guess — default pattern"
 
     def as_row(self) -> Dict[str, str]:
         return {
             "Full Name": self.full_name,
             "Designation": self.designation,
-            "Estimated Email": self.estimated_email,
+            "Email": self.estimated_email,
+            "Email Source": self.email_source,
             "Country": self.country,
             "Category": self.category,
             "LinkedIn Profile": self.linkedin_profile,
@@ -80,8 +92,13 @@ class SearchReport:
     dropped_not_profile: int = 0
     dropped_unparsed_title: int = 0
     dropped_off_target: int = 0
+    dropped_wrong_country: int = 0
     dropped_duplicate: int = 0
     kept: int = 0
+    emails_observed: int = 0
+    emails_guessed: int = 0
+    company_pattern: str = ""
+    enrichment_note: str = ""
 
     @property
     def blocked(self) -> bool:
@@ -97,13 +114,17 @@ class SearchReport:
     def summary(self) -> str:
         return (
             "{raw} raw results — dropped {np} non-profile, {ut} unparseable, "
-            "{ot} off-target, {dup} duplicate; kept {kept}".format(
+            "{ot} off-target, {wc} wrong-country, {dup} duplicate; "
+            "kept {kept} ({obs} observed emails, {gs} guessed)".format(
                 raw=self.raw_results,
                 np=self.dropped_not_profile,
                 ut=self.dropped_unparsed_title,
                 ot=self.dropped_off_target,
+                wc=self.dropped_wrong_country,
                 dup=self.dropped_duplicate,
                 kept=self.kept,
+                obs=self.emails_observed,
+                gs=self.emails_guessed,
             )
         )
 
@@ -161,6 +182,7 @@ def _to_contact(
     fallback_category: str,
     company_tokens: Sequence[str],
     require_company: bool,
+    country_mode: str = "off",
 ) -> tuple:
     """Turn one raw result node into ``(contact, reason)``.
 
@@ -187,6 +209,18 @@ def _to_contact(
     ):
         return None, "off_target"
 
+    # The country check reads the locale subdomain off the raw URL, so it must
+    # run before canonical_linkedin_url() rewrites every host to www.
+    if country_mode != "off":
+        verdict = country_match(
+            country,
+            result.url,
+            " ".join((result.title, result.snippet)),
+            strict=(country_mode == "strict"),
+        )
+        if not verdict.matches:
+            return None, "wrong_country"
+
     contact = Contact(
         full_name=parsed.full_name,
         designation=parsed.designation or fallback_category,
@@ -198,6 +232,86 @@ def _to_contact(
     return contact, "kept"
 
 
+def _enrich_emails(
+    contacts: List[Contact],
+    domain: str,
+    fallback_pattern: str,
+    hunter_key: str,
+    use_finder: bool,
+    session: Optional[requests.Session],
+    report: SearchReport,
+    progress: Optional[ProgressHook] = None,
+) -> List[Contact]:
+    """Replace guessed addresses with observed ones wherever Hunter has them.
+
+    A single ``domain-search`` call does most of the work: it returns the
+    company's real pattern plus every address Hunter already holds for the
+    domain, so several executives resolve outright and the rest are guessed
+    with the company's own pattern rather than an assumed one.  Per-person
+    lookups are opt-in because they cost one API credit each.
+    """
+    if not contacts or not domain:
+        return contacts
+
+    if not hunter_key:
+        report.enrichment_note = (
+            "No Hunter API key — every address is a pattern guess."
+        )
+        report.emails_guessed = len(contacts)
+        return contacts
+
+    if progress:
+        progress("Looking up real email addresses…", 0.95)
+
+    client = HunterClient(hunter_key, session=session)
+    profile: Optional[DomainProfile] = None
+    try:
+        profile = client.domain_search(domain)
+        report.company_pattern = profile.pattern
+        report.enrichment_note = (
+            "Hunter knows {} addresses at {}{}.".format(
+                profile.total,
+                domain,
+                " (pattern {})".format(profile.pattern) if profile.pattern else "",
+            )
+        )
+    except HunterError as exc:
+        report.enrichment_note = "Hunter lookup failed: {}".format(exc)
+
+    enriched: List[Contact] = []
+    for contact in contacts:
+        result = resolve_email(
+            contact.full_name,
+            domain,
+            profile=profile,
+            client=client,
+            use_finder=use_finder,
+            fallback_pattern=fallback_pattern,
+        )
+        if result is None:
+            enriched.append(contact)
+            report.emails_guessed += 1
+            continue
+
+        if result.is_observed:
+            report.emails_observed += 1
+        else:
+            report.emails_guessed += 1
+
+        enriched.append(
+            Contact(
+                full_name=contact.full_name,
+                designation=contact.designation,
+                estimated_email=result.address,
+                country=contact.country,
+                category=contact.category,
+                linkedin_profile=contact.linkedin_profile,
+                email_source=result.label(),
+            )
+        )
+    return enriched
+
+
 def find_contacts_detailed(
     company: str,
     domain: str = "",
@@ -206,6 +320,9 @@ def find_contacts_detailed(
     email_pattern: str = DEFAULT_PATTERN,
     max_per_category: int = 10,
     require_company: bool = False,
+    country_filter: str = "strict",
+    hunter_key: str = "",
+    use_email_finder: bool = False,
     pause: float = 1.5,
     session: Optional[requests.Session] = None,
     progress: Optional[ProgressHook] = None,
@@ -228,6 +345,11 @@ def find_contacts_detailed(
     mail_domain = normalise_domain(domain, company)
     tokens = _company_tokens(company)
     session = session or requests.Session()
+
+    # Filtering on an unrecognised country would silently drop every row, so
+    # the filter only engages for countries geo.py can actually verify.
+    country_mode = country_filter if (country.strip() and
+                                      known_country(country)) else "off"
 
     contacts: List[Contact] = []
     seen: set = set()
@@ -256,7 +378,7 @@ def find_contacts_detailed(
                 break
             contact, reason = _to_contact(
                 result, company, country, mail_domain, email_pattern,
-                category, tokens, require_company,
+                category, tokens, require_company, country_mode,
             )
             if contact is None:
                 setattr(report, "dropped_" + reason,
@@ -281,6 +403,11 @@ def find_contacts_detailed(
         error.outcomes = report.outcomes
         error.report = report
         raise error
+
+    contacts = _enrich_emails(
+        contacts, mail_domain, email_pattern, hunter_key, use_email_finder,
+        session, report, progress,
+    )
 
     order = {category: i for i, category in enumerate(roles.CATEGORIES)}
     contacts.sort(key=lambda c: (order.get(c.category, 99), c.full_name.lower()))

@@ -107,13 +107,28 @@ def build_email(
     surname_tokens = [t for t in remainder if t not in _PARTICLES] or remainder
     last = surname_tokens[-1] if surname_tokens else ""
 
-    template = EMAIL_PATTERNS.get(pattern, EMAIL_PATTERNS[DEFAULT_PATTERN])
-    local = template.format(
-        first=first,
-        last=last,
-        f=first[0],
-        l=last[0] if last else "",
-    )
+    # Accept either a named pattern ("first.last") or a raw template
+    # ("{first}.{last}") — Hunter reports a company's observed pattern in the
+    # latter form, using the same placeholders.
+    if pattern in EMAIL_PATTERNS:
+        template = EMAIL_PATTERNS[pattern]
+    elif pattern and "{" in pattern:
+        template = pattern
+    else:
+        template = EMAIL_PATTERNS[DEFAULT_PATTERN]
+    try:
+        local = template.format(
+            first=first,
+            last=last,
+            f=first[0],
+            l=last[0] if last else "",
+        )
+    except (KeyError, IndexError):
+        # An unexpected placeholder in a provider-supplied pattern must not
+        # take down the row; fall back to the default shape.
+        local = EMAIL_PATTERNS[DEFAULT_PATTERN].format(
+            first=first, last=last, f=first[0], l=last[0] if last else ""
+        )
     local = local.strip("._").replace("..", ".")
     if not local:
         local = first

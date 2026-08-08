@@ -28,16 +28,21 @@ Press **Extract Real Executive Contacts** to render the output matrix:
 
 | Column | Description | Example |
 | :--- | :--- | :--- |
-| Full Name | Human name parsed from the profile header | `Daniel Ek` |
-| Designation | Exact corporate job title | `Chief Executive Officer at Spotify` |
-| Estimated Email | Formatted corporate email | `daniel.ek@spotify.com` |
+| Full Name | Human name parsed from the profile header | `Jim Rowan` |
+| Designation | Exact corporate job title | `Chief Executive Officer at Volvo Cars` |
+| Email | Real address where one can be found, otherwise a guess | `jrowan@volvocars.com` |
+| Email Source | Provenance of that address | `Verified — Hunter directory · 97%` |
 | Country | Specified region filter | `Sweden` |
 | Category | Departmental role classification | `CEO / Executive` |
 | LinkedIn Profile | Link to the individual's profile | `Open Profile` |
 
+**Never treat the Email column as uniformly reliable — read Email Source.**
+`Verified` and `Found` are addresses Hunter actually observed; `Guess` rows are
+derived from a naming pattern and are not confirmed to exist.
+
 Sidebar settings tune the run: which role categories to search, how many results
-to keep per category, the email pattern (`first.last`, `flast`, `f.last`, …) and
-a stricter filter that drops results which never name the company.
+to keep per category, how strictly to enforce the country, the email lookup key,
+and a stricter filter that drops results which never name the company.
 
 Results are cached for one hour per input combination, and the full matrix can
 be exported with **Download CSV**.
@@ -64,6 +69,8 @@ executive_finder/
 ├── search.py                 X-Ray query building, HTTP fetching, SERP parsing
 ├── parsing.py                Title & link unpackaging
 ├── emails.py                 Name sanitisation and email generation
+├── enrichment.py             Real email lookup via Hunter.io
+├── geo.py                    Country matching (locale, country and city evidence)
 └── pipeline.py               Orchestration, filtering, de-duplication
 tests/                        Unit tests (pytest)
 ```
@@ -88,10 +95,13 @@ tests/                        Unit tests (pytest)
    headers are split into name and designation. Listing pages, company pages and
    post excerpts are rejected by a name-plausibility check.
 
-4. **Email generation** — names are folded to ASCII (`Ödegård` → `odegard`,
-   `Kjell-Åke` → `kjell ake`), nobiliary particles are dropped
-   (`Jan van der Berg` → `jan.berg`), and the address is formatted with the
-   selected corporate pattern.
+4. **Country filtering** — the country in the query is only a ranking hint, so
+   results from other markets leak through. A positive check runs on each
+   result: the LinkedIn locale subdomain (`se.linkedin.com` → Sweden), the
+   country named in the text (including endonyms like *Sverige*), or a known
+   city of that country. Read `geo.py`.
+
+5. **Email resolution** — see below.
 
 Providers are tried in order — Serper and Brave first when an API key is
 configured, then the scraped front-ends (DuckDuckGo HTML, DuckDuckGo Lite, Bing,
@@ -108,9 +118,10 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-51 tests cover query construction, redirect unwrapping, SERP parsing, title
-unpackaging, name sanitisation, email patterns, role classification and the
-end-to-end pipeline (with the network stubbed).
+131 tests cover query construction, redirect unwrapping (including Bing's
+base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
+sanitisation, email patterns, Hunter enrichment, country matching, role
+classification and the end-to-end pipeline (with the network stubbed).
 
 ## Deployment — Streamlit Community Cloud
 
@@ -150,6 +161,28 @@ present it is used first; the scraped providers stay as a fallback. Locally,
 
 The same keys are read from the `SERPER_API_KEY` / `BRAVE_API_KEY` environment
 variables when not running under Streamlit.
+
+## Real email addresses
+
+Without a Hunter.io key every address is a **pattern guess** — `first.last@…` or
+whichever shape you pick — which is simply wrong whenever the company uses a
+different convention, and says nothing about whether the mailbox exists.
+
+Add a [Hunter.io](https://hunter.io) key (sidebar → **Email lookup**, or
+`HUNTER_API_KEY` in Secrets) and the app resolves addresses instead:
+
+1. **One `domain-search` call per run** returns the company's *observed* pattern
+   plus every address Hunter already holds for that domain. Executives in that
+   set get their real address outright, tagged `Verified`.
+2. **Everyone else is guessed with the company's own pattern** rather than an
+   assumed one — for Volvo Cars that is `{f}{last}`, so `aberg@volvocars.com`,
+   not `anna.berg@volvocars.com`.
+3. **Optional per-person lookup** (`Look up each person individually`) resolves
+   the remainder via `email-finder`. It costs one Hunter credit per person, so
+   it is off by default.
+
+The **Email Source** column always states which of these produced the address.
+Hunter's free tier is 25 searches a month, and step 1 spends one per run.
 
 ## Troubleshooting
 

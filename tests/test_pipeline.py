@@ -55,7 +55,7 @@ def test_find_contacts_builds_the_six_column_matrix(monkeypatch):
 
     ceo = next(row for row in rows if row["Full Name"] == "Daniel Ek")
     assert ceo["Designation"] == "Chief Executive Officer at Spotify"
-    assert ceo["Estimated Email"] == "daniel.ek@spotify.com"
+    assert ceo["Email"] == "daniel.ek@spotify.com"
     assert ceo["Country"] == "Sweden"
     assert ceo["Category"] == "CEO / Executive"
     assert ceo["LinkedIn Profile"] == "https://www.linkedin.com/in/daniel-ek"
