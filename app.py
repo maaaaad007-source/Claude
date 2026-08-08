@@ -46,7 +46,17 @@ def _load_api_keys() -> None:
     configure_api_keys(serper=_secret("SERPER_API_KEY"), brave=_secret("BRAVE_API_KEY"))
 
 
-_load_api_keys()
+def _apply_session_key() -> None:
+    """Apply a key pasted into the sidebar for this browser session.
+
+    The Secrets editor on Streamlit Cloud is buried behind a menu that is hard
+    to reach on a phone, so the app accepts a key directly.  It is held in
+    session state only — never written to disk, never logged, and gone when the
+    tab closes — so Secrets remains the better home for a permanent key.
+    """
+    typed = st.session_state.get("session_api_key", "").strip()
+    if typed:
+        configure_api_keys(serper=typed)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -58,12 +68,15 @@ def _cached_search(
     email_pattern: str,
     max_per_category: int,
     require_company: bool,
+    has_api_key: bool,
     _progress=None,
 ):
     """Run the pipeline behind a one-hour cache keyed on the search inputs.
 
     ``_progress`` is underscore-prefixed so Streamlit leaves it out of the
     cache key — the callback differs on every rerun but the results do not.
+    ``has_api_key`` is part of the key so that adding a key invalidates a
+    cached blocked run instead of replaying it.
     """
     contacts, report = find_contacts_detailed(
         company=company,
@@ -94,20 +107,21 @@ connection but is blocked from shared datacenter IPs — which is exactly what
 Streamlit Community Cloud runs on. Every app on that host shares the same
 outbound addresses, so search engines challenge them by default.
 
-**The fix — add a search API key** (both have free tiers):
+**Fastest fix — paste a key in the sidebar.** Open the sidebar (the **»**
+arrow, top-left), scroll to **Search API key**, paste, and search again. Get a
+free key at [serper.dev](https://serper.dev) — 2,500 queries, no card needed.
+The key lasts for this browser session.
 
-1. Get a key from [serper.dev](https://serper.dev) (2,500 free queries) or
-   [Brave Search API](https://brave.com/search/api/).
-2. In your app on Streamlit Cloud: **Manage app → Settings → Secrets**.
-3. Paste one line and save — the app restarts automatically:
+**To make it permanent**, add it to your app's Secrets instead:
+[share.streamlit.io](https://share.streamlit.io) → the **⋮** menu beside your
+app → **Settings** → **Secrets** →
 
 ```toml
 SERPER_API_KEY = "your-key-here"
 ```
 
-The app picks the key up on the next run and routes queries through the API
-instead of scraping. Running locally with `streamlit run app.py` also works
-without a key, since your home IP is not blocked.
+Running locally with `streamlit run app.py` needs no key at all — your home IP
+is not blocked.
 """
     )
 
@@ -188,6 +202,26 @@ def main() -> None:
             help="Stricter filter — fewer rows, less noise.",
         )
         st.divider()
+        st.subheader("Search API key")
+        st.text_input(
+            "Serper API key",
+            key="session_api_key",
+            type="password",
+            placeholder="paste key here",
+            help="Needed on hosted deployments, where search engines block the "
+                 "shared server IP. Held for this browser session only.",
+        )
+        _apply_session_key()
+        if api_key("serper") or api_key("brave"):
+            st.success("Search API key active.", icon="✅")
+        else:
+            st.warning("No API key — hosted runs will likely be blocked.", icon="⚠️")
+            st.caption(
+                "After pasting, press **Enter** (or tap outside the box) — "
+                "Streamlit only applies the value once the field is committed."
+            )
+
+        st.divider()
         st.caption(
             "Emails are **predicted** from public naming conventions, not "
             "verified. Confirm before outreach and follow GDPR/CAN-SPAM rules "
@@ -233,6 +267,7 @@ def main() -> None:
                 email_pattern,
                 max_per_category,
                 require_company,
+                bool(api_key("serper") or api_key("brave")),
                 _progress=progress,
             )
         except SearchError as exc:

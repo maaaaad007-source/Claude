@@ -128,7 +128,14 @@ shared datacenter IPs, which is what Streamlit Community Cloud runs on. Every
 app on that host shares the same outbound addresses, so search engines answer
 with a bot challenge instead of results.
 
-Add a key under **Manage app → Settings → Secrets**:
+There are two ways to supply a key.
+
+**In the app (fastest, works on mobile).** Open the sidebar, scroll to
+**Search API key**, paste, press Enter. The key is held in session state only —
+never written to disk or logged — and is gone when the tab closes.
+
+**In Secrets (permanent).** On [share.streamlit.io](https://share.streamlit.io),
+open the **⋮** menu beside your app → **Settings** → **Secrets**:
 
 ```toml
 SERPER_API_KEY = "your-key-here"
