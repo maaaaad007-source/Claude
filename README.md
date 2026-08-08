@@ -119,7 +119,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-152 tests cover query construction, redirect unwrapping (including Bing's
+156 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
@@ -141,28 +141,54 @@ shared datacenter IPs, which is what Streamlit Community Cloud runs on. Every
 app on that host shares the same outbound addresses, so search engines answer
 with a bot challenge instead of results.
 
-There are two ways to supply a key.
+Keys are resolved from two layers on every run:
 
-**In the app (fastest, works on mobile).** Open the sidebar, scroll to
-**Search API key**, paste, press Enter. The key is held in session state only —
-never written to disk or logged — and is gone when the tab closes.
+1. **The deployment** — Streamlit Secrets, falling back to the process
+   environment. Set once, applies to every visitor and every session.
+2. **The sidebar** — a per-session override, useful for trying a key without
+   redeploying. Held in session state only: never written to disk, never
+   logged, gone when the tab closes.
 
-**In Secrets (permanent).** On [share.streamlit.io](https://share.streamlit.io),
-open the **⋮** menu beside your app → **Settings** → **Secrets**:
+The sidebar wins while it has a value; clear it and the deployment key resumes.
+The sidebar states which layer is in force, so "am I using the stored key?" is
+never a guess.
+
+### Storing the key in the deployment (recommended)
+
+On Streamlit Cloud, from **the app list at
+[share.streamlit.io](https://share.streamlit.io)** — not from inside the running
+app:
+
+1. Sign in and find your app in the list.
+2. Click the **⋮** to the right of the app's name.
+3. **Settings** → **Secrets**.
+4. Paste and **Save**. The app reboots itself; no redeploy needed.
 
 ```toml
 SERPER_API_KEY = "your-key-here"
-# or
+# optional alternatives / additions
 BRAVE_API_KEY = "your-key-here"
+HUNTER_API_KEY = "your-key-here"
 ```
+
+The sidebar should then read *"loaded from this app's configuration"* with the
+box left empty.
+
+Running elsewhere, the same names are read from environment variables:
+
+```bash
+SERPER_API_KEY=... streamlit run app.py
+```
+
+For local runs, copy `.streamlit/secrets.toml.example` to
+`.streamlit/secrets.toml` and fill it in — that path is gitignored. **Never
+commit a real key**; this repository is on GitHub and a committed key stays in
+the history even after deletion.
 
 Both [serper.dev](https://serper.dev) and the
 [Brave Search API](https://brave.com/search/api/) have free tiers. When a key is
 present it is used first; the scraped providers stay as a fallback. Locally,
-`streamlit run app.py` works without a key.
-
-The same keys are read from the `SERPER_API_KEY` / `BRAVE_API_KEY` environment
-variables when not running under Streamlit.
+`streamlit run app.py` works without a key at all.
 
 ## Real email addresses
 

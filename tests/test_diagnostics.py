@@ -339,3 +339,44 @@ def test_pasted_keys_are_stripped_of_quotes(monkeypatch, pasted):
     monkeypatch.setattr(search_mod, "_API_KEYS", {})
     search_mod.configure_api_keys(serper=pasted)
     assert search_mod.api_key("serper") == "abc123"
+
+
+# --------------------------------------------------------------------------- #
+# Key resolution: deployment-configured vs per-session
+# --------------------------------------------------------------------------- #
+def test_replace_clears_a_key_so_layered_sources_fall_back(monkeypatch):
+    """Emptying an override must not leave the previous value in force."""
+    monkeypatch.setattr(search_mod, "_API_KEYS", {})
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+
+    search_mod.configure_api_keys(serper="typed-in-sidebar", replace=True)
+    assert search_mod.api_key("serper") == "typed-in-sidebar"
+
+    # Sidebar emptied, no deployment key configured -> nothing in force.
+    search_mod.configure_api_keys(serper="", replace=True)
+    assert search_mod.api_key("serper") == ""
+
+
+def test_replace_false_still_layers_without_clearing(monkeypatch):
+    monkeypatch.setattr(search_mod, "_API_KEYS", {})
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+
+    search_mod.configure_api_keys(serper="from-secrets")
+    search_mod.configure_api_keys(serper="")          # no replace -> keep
+    assert search_mod.api_key("serper") == "from-secrets"
+
+
+def test_session_key_overrides_the_deployment_key(monkeypatch):
+    monkeypatch.setattr(search_mod, "_API_KEYS", {})
+    search_mod.configure_api_keys(serper="typed", replace=True)
+    assert search_mod.api_key("serper") == "typed"
+
+    # Sidebar cleared, deployment key present -> deployment key resumes.
+    search_mod.configure_api_keys(serper="from-deployment", replace=True)
+    assert search_mod.api_key("serper") == "from-deployment"
+
+
+def test_environment_variable_is_read_when_nothing_is_registered(monkeypatch):
+    monkeypatch.setattr(search_mod, "_API_KEYS", {})
+    monkeypatch.setenv("SERPER_API_KEY", "from-environment")
+    assert search_mod.api_key("serper") == "from-environment"

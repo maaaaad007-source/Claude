@@ -398,12 +398,25 @@ def _clean_key(value: str) -> str:
     return (value or "").strip().strip("\"'‘’“”").strip()
 
 
-def configure_api_keys(serper: str = "", brave: str = "") -> None:
-    """Register search API credentials for this process."""
-    if serper:
-        _API_KEYS["serper"] = _clean_key(serper)
-    if brave:
-        _API_KEYS["brave"] = _clean_key(brave)
+def configure_api_keys(
+    serper: str = "",
+    brave: str = "",
+    replace: bool = False,
+) -> None:
+    """Register search API credentials for this process.
+
+    By default only non-empty values are stored, so a caller can layer one
+    source over another.  Pass ``replace=True`` to set the registry to exactly
+    these values — an empty string then *clears* that key, which is what a
+    caller resolving several sources on every run needs so that emptying an
+    override falls back instead of leaving the previous value behind.
+    """
+    for name, value in (("serper", serper), ("brave", brave)):
+        cleaned = _clean_key(value)
+        if cleaned:
+            _API_KEYS[name] = cleaned
+        elif replace:
+            _API_KEYS.pop(name, None)
 
 
 def api_key(name: str) -> str:

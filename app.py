@@ -6,6 +6,8 @@ optional country, then renders the six-column executive contact matrix.
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 import streamlit as st
 
@@ -29,37 +31,43 @@ st.set_page_config(
 )
 
 
-def _load_api_keys() -> None:
-    """Pick up search API credentials from Streamlit secrets, if present.
+def _secret(name: str) -> str:
+    """Read one Streamlit secret, tolerating the absence of any secrets file.
 
-    Hosted deployments share a datacenter IP that search engines block far
-    more aggressively than a home connection, so a key is the only reliable
-    path there.  Absent one the app still runs on the scraped providers.
+    ``st.secrets`` raises on *lookup* — and raises outright when no
+    secrets.toml exists — so every read must be guarded individually.
     """
-    def _secret(name: str) -> str:
-        # st.secrets raises on *lookup*, not on attribute access, and raises
-        # when no secrets.toml exists at all — so each read must be guarded.
-        try:
-            return str(st.secrets[name])
-        except Exception:
-            return ""
-
-    configure_api_keys(serper=_secret("SERPER_API_KEY"), brave=_secret("BRAVE_API_KEY"))
-    if _secret("HUNTER_API_KEY"):
-        st.session_state.setdefault("secrets_hunter_key", _secret("HUNTER_API_KEY"))
+    try:
+        return str(st.secrets[name])
+    except Exception:
+        return ""
 
 
-def _apply_session_key() -> None:
-    """Apply a key pasted into the sidebar for this browser session.
+def _configured_key(name: str) -> str:
+    """A key supplied by the deployment: Streamlit secrets, else environment."""
+    return _secret(name) or os.environ.get(name, "")
 
-    The Secrets editor on Streamlit Cloud is buried behind a menu that is hard
-    to reach on a phone, so the app accepts a key directly.  It is held in
-    session state only — never written to disk, never logged, and gone when the
-    tab closes — so Secrets remains the better home for a permanent key.
+
+def _resolve_api_keys() -> str:
+    """Settle which search key is in force this run and report its origin.
+
+    Two sources are layered, deployment-wide first and a per-session override
+    second, and the whole registry is rewritten every run.  Rewriting matters:
+    without it, emptying the sidebar box would leave the previously typed key
+    in place instead of falling back to the deployment's own key.
     """
+    deployment = _configured_key("SERPER_API_KEY")
     typed = st.session_state.get("session_api_key", "").strip()
+
+    configure_api_keys(
+        serper=typed or deployment,
+        brave=_configured_key("BRAVE_API_KEY"),
+        replace=True,
+    )
+
     if typed:
-        configure_api_keys(serper=typed)
+        return "session" if not deployment else "session override"
+    return "deployment" if deployment else ""
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -239,7 +247,7 @@ def main() -> None:
         )
         hunter_key = (
             st.session_state.get("hunter_api_key", "").strip()
-            or st.session_state.get("secrets_hunter_key", "")
+            or _configured_key("HUNTER_API_KEY")
         )
         discover_patterns = st.checkbox(
             "Infer the pattern from published addresses",
@@ -284,9 +292,16 @@ def main() -> None:
             help="Needed on hosted deployments, where search engines block the "
                  "shared server IP. Held for this browser session only.",
         )
-        _apply_session_key()
-        if api_key("serper") or api_key("brave"):
-            st.success("Search API key active.", icon="✅")
+        key_source = _resolve_api_keys()
+        if key_source == "deployment":
+            st.success("Search API key active — loaded from this app's "
+                       "configuration. Nothing to enter.", icon="✅")
+        elif key_source:
+            st.success("Search API key active — entered this session.", icon="✅")
+            st.caption(
+                "Add it to the app's Secrets to stop re-entering it — see the "
+                "README, *Hosted deployments need an API key*."
+            )
         else:
             st.warning("No API key — hosted runs will likely be blocked.", icon="⚠️")
             st.caption(
