@@ -93,9 +93,14 @@ tests/                        Unit tests (pytest)
    (`Jan van der Berg` → `jan.berg`), and the address is formatted with the
    selected corporate pattern.
 
-Two providers are tried in order (DuckDuckGo's HTML endpoint, then Bing); the
-first one returning usable rows wins. A `SearchError` surfaces in the UI only
-when every provider fails.
+Providers are tried in order — Serper and Brave first when an API key is
+configured, then the scraped front-ends (DuckDuckGo HTML, DuckDuckGo Lite, Bing,
+Mojeek) — and the first one returning usable rows wins.
+
+A provider answering HTTP 200 with a bot-challenge page is recorded as
+**blocked**, not **empty**. Without that distinction a block is indistinguishable
+from a genuine zero-result search, and the UI reports "nothing matched" when the
+truth is "we were refused."
 
 ## Tests
 
@@ -112,10 +117,49 @@ end-to-end pipeline (with the network stubbed).
 1. Push this repository to GitHub.
 2. On <https://share.streamlit.io> choose **New app**, select the repository and
    branch, and set the main file to `app.py`.
-3. Deploy. `requirements.txt` is picked up automatically; no secrets are needed.
+3. Deploy. `requirements.txt` is picked up automatically.
+4. **Add a search API key** (see below) — without one, a hosted deployment will
+   almost certainly return no results.
 
-Shared cloud IPs are rate-limited by search engines more aggressively than a
-home connection, so expect emptier result sets there than when running locally.
+### Hosted deployments need an API key
+
+Scraping search-engine HTML works from a home connection but is blocked from
+shared datacenter IPs, which is what Streamlit Community Cloud runs on. Every
+app on that host shares the same outbound addresses, so search engines answer
+with a bot challenge instead of results.
+
+Add a key under **Manage app → Settings → Secrets**:
+
+```toml
+SERPER_API_KEY = "your-key-here"
+# or
+BRAVE_API_KEY = "your-key-here"
+```
+
+Both [serper.dev](https://serper.dev) and the
+[Brave Search API](https://brave.com/search/api/) have free tiers. When a key is
+present it is used first; the scraped providers stay as a fallback. Locally,
+`streamlit run app.py` works without a key.
+
+The same keys are read from the `SERPER_API_KEY` / `BRAVE_API_KEY` environment
+variables when not running under Streamlit.
+
+## Troubleshooting
+
+The **Run diagnostics** panel under every result set shows exactly what each
+provider did and where rows were dropped. The app distinguishes four outcomes:
+
+| Message | Meaning |
+| :--- | :--- |
+| Blocked by the search providers | Providers answered with a challenge page. Add an API key. |
+| Providers returned no results at all | The queries genuinely matched nothing. Broaden the company name or drop the country filter. |
+| Found N results, none survived filtering | Results came back but were company pages, listicles, or off-target roles. |
+| Contacts found | Working normally. |
+
+Putting a **domain in the Company Name field** (`Spotify.com` rather than
+`Spotify`) breaks every query, since no LinkedIn headline contains that string.
+The app detects this, splits it into a name and a mail domain, and tells you it
+did so — but typing the plain company name is better.
 
 ## Accuracy and responsible use
 

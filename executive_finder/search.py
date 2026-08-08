@@ -7,25 +7,35 @@ into ``SearchResult`` records with tracking redirects stripped.
 
 from __future__ import annotations
 
+import os
 import random
 import re
 import time
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence
-from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlunparse
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
 
 __all__ = [
-    "SearchResult",
+    "PROVIDERS",
+    "Provider",
+    "ProviderOutcome",
     "SearchError",
+    "SearchResult",
+    "api_key",
     "build_query",
     "canonical_linkedin_url",
+    "configure_api_keys",
     "is_linkedin_profile",
-    "parse_duckduckgo",
+    "looks_blocked",
     "parse_bing",
+    "parse_ddg_lite",
+    "parse_duckduckgo",
+    "parse_mojeek",
     "search",
+    "search_detailed",
     "unwrap_redirect",
 ]
 
@@ -55,7 +65,11 @@ BASE_HEADERS = {
 }
 
 DUCKDUCKGO_ENDPOINT = "https://html.duckduckgo.com/html/"
+DDG_LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
 BING_ENDPOINT = "https://www.bing.com/search"
+MOJEEK_ENDPOINT = "https://www.mojeek.com/search"
+SERPER_ENDPOINT = "https://google.serper.dev/search"
+BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
 _PROFILE_PATH = re.compile(r"^/in/[^/]+", re.IGNORECASE)
 _LINKEDIN_HOST = re.compile(r"(?:^|\.)linkedin\.com$", re.IGNORECASE)
@@ -192,6 +206,47 @@ def parse_duckduckgo(html: str) -> List[SearchResult]:
     return results
 
 
+def parse_ddg_lite(html: str) -> List[SearchResult]:
+    """Extract result nodes from the DuckDuckGo Lite table layout."""
+    results: List[SearchResult] = []
+    soup = _soup(html)
+    for anchor in soup.select("a.result-link"):
+        row = anchor.find_parent("tr")
+        snippet = ""
+        if row is not None:
+            following = row.find_next_sibling("tr")
+            if following is not None:
+                node = following.select_one(".result-snippet") or following
+                snippet = node.get_text(" ", strip=True)
+        results.append(
+            SearchResult(
+                title=anchor.get_text(" ", strip=True),
+                url=unwrap_redirect(anchor.get("href", "")),
+                snippet=snippet,
+            )
+        )
+    return results
+
+
+def parse_mojeek(html: str) -> List[SearchResult]:
+    """Extract result nodes from a Mojeek SERP."""
+    results: List[SearchResult] = []
+    soup = _soup(html)
+    for node in soup.select("ul.results-standard li, li.result"):
+        anchor = node.select_one("a.title") or node.select_one("h2 a")
+        if anchor is None:
+            continue
+        snippet_node = node.select_one("p.s, .s")
+        results.append(
+            SearchResult(
+                title=anchor.get_text(" ", strip=True),
+                url=unwrap_redirect(anchor.get("href", "")),
+                snippet=snippet_node.get_text(" ", strip=True) if snippet_node else "",
+            )
+        )
+    return results
+
+
 def parse_bing(html: str) -> List[SearchResult]:
     """Extract result nodes from a Bing SERP."""
     results: List[SearchResult] = []
@@ -242,10 +297,235 @@ def _fetch_bing(session: requests.Session, query: str, timeout: float) -> str:
     return response.text
 
 
-PROVIDERS = (
-    ("duckduckgo", _fetch_duckduckgo, parse_duckduckgo),
-    ("bing", _fetch_bing, parse_bing),
+def _fetch_ddg_lite(session: requests.Session, query: str, timeout: float) -> str:
+    response = session.post(
+        DDG_LITE_ENDPOINT,
+        data={"q": query},
+        headers={**_headers(), "Referer": "https://lite.duckduckgo.com/"},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response.text
+
+
+def _fetch_mojeek(session: requests.Session, query: str, timeout: float) -> str:
+    response = session.get(
+        MOJEEK_ENDPOINT,
+        params={"q": query},
+        headers=_headers(),
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response.text
+
+
+# --------------------------------------------------------------------------- #
+# Block / challenge detection
+# --------------------------------------------------------------------------- #
+_BLOCK_MARKERS = (
+    "unusual traffic",
+    "verify you are human",
+    "are you a robot",
+    "captcha",
+    "challenge-platform",
+    "/sorry/index",
+    "access denied",
+    "request blocked",
+    "detected unusual activity",
+    "enable javascript and cookies",
+    "your computer network may be sending automated queries",
 )
+
+
+def looks_blocked(html: str) -> bool:
+    """True when a 200 response is really a bot challenge or block page.
+
+    Search front-ends rarely answer an automated client with an HTTP error;
+    they answer 200 with a challenge page or an empty shell.  Without this
+    check a block is indistinguishable from a genuine zero-result search.
+    """
+    if not html:
+        return True
+    lowered = html.lower()
+    if any(marker in lowered for marker in _BLOCK_MARKERS):
+        return True
+    # A real SERP is tens of kilobytes; a stub this small never carries results.
+    return len(html) < 1500
+
+
+# --------------------------------------------------------------------------- #
+# API-backed providers
+# --------------------------------------------------------------------------- #
+# Scraping HTML SERPs from a shared datacenter IP (Streamlit Community Cloud,
+# CI runners, most VPS hosts) is blocked far more aggressively than from a
+# residential connection.  When an API key is configured it is used first,
+# because it is the only path that works reliably from such hosts.
+_API_KEYS: Dict[str, str] = {}
+
+
+def configure_api_keys(serper: str = "", brave: str = "") -> None:
+    """Register search API credentials for this process."""
+    if serper:
+        _API_KEYS["serper"] = serper.strip()
+    if brave:
+        _API_KEYS["brave"] = brave.strip()
+
+
+def api_key(name: str) -> str:
+    """Return a configured key, falling back to the environment."""
+    return _API_KEYS.get(name) or os.environ.get("{}_API_KEY".format(name.upper()), "")
+
+
+def _fetch_serper(session: requests.Session, query: str, timeout: float) -> List[SearchResult]:
+    key = api_key("serper")
+    if not key:
+        raise SearchError("no Serper API key configured")
+    response = session.post(
+        SERPER_ENDPOINT,
+        json={"q": query, "num": 20},
+        headers={"X-API-KEY": key, "Content-Type": "application/json"},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return [
+        SearchResult(
+            title=item.get("title", ""),
+            url=item.get("link", ""),
+            snippet=item.get("snippet", ""),
+        )
+        for item in payload.get("organic", [])
+    ]
+
+
+def _fetch_brave(session: requests.Session, query: str, timeout: float) -> List[SearchResult]:
+    key = api_key("brave")
+    if not key:
+        raise SearchError("no Brave API key configured")
+    response = session.get(
+        BRAVE_ENDPOINT,
+        params={"q": query, "count": 20},
+        headers={"X-Subscription-Token": key, "Accept": "application/json"},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return [
+        SearchResult(
+            title=item.get("title", ""),
+            url=item.get("url", ""),
+            snippet=item.get("description", ""),
+        )
+        for item in payload.get("web", {}).get("results", [])
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Provider registry and dispatch
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Provider:
+    """A search back-end: how to fetch it and how to read its response."""
+
+    name: str
+    fetch: Callable
+    parse: Optional[Callable] = None
+    needs_key: str = ""
+
+    @property
+    def available(self) -> bool:
+        return not self.needs_key or bool(api_key(self.needs_key))
+
+
+PROVIDERS: Tuple[Provider, ...] = (
+    Provider("serper", _fetch_serper, None, needs_key="serper"),
+    Provider("brave", _fetch_brave, None, needs_key="brave"),
+    Provider("duckduckgo", _fetch_duckduckgo, parse_duckduckgo),
+    Provider("duckduckgo-lite", _fetch_ddg_lite, parse_ddg_lite),
+    Provider("bing", _fetch_bing, parse_bing),
+    Provider("mojeek", _fetch_mojeek, parse_mojeek),
+)
+
+
+@dataclass
+class ProviderOutcome:
+    """What one provider did with one query — the raw diagnostic record."""
+
+    name: str
+    status: str  # "ok" | "empty" | "blocked" | "error" | "skipped"
+    rows: int = 0
+    detail: str = ""
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        base = "{}: {} ({} rows)".format(self.name, self.status, self.rows)
+        return base + (" — " + self.detail if self.detail else "")
+
+
+def search_detailed(
+    query: str,
+    session: Optional[requests.Session] = None,
+    timeout: float = 15.0,
+    pause: float = 1.0,
+) -> Tuple[List[SearchResult], List[ProviderOutcome]]:
+    """Run ``query`` and return both the results and per-provider outcomes.
+
+    Providers are tried in order until one returns usable rows.  A provider
+    answering 200 with a challenge page is recorded as ``blocked`` rather than
+    ``empty``, so "we were refused" is never reported as "nothing matched".
+    """
+    session = session or requests.Session()
+    outcomes: List[ProviderOutcome] = []
+    attempted = 0
+
+    for provider in PROVIDERS:
+        if not provider.available:
+            outcomes.append(
+                ProviderOutcome(provider.name, "skipped", detail="no API key configured")
+            )
+            continue
+
+        if attempted and pause:
+            time.sleep(pause)
+        attempted += 1
+
+        try:
+            payload = provider.fetch(session, query, timeout)
+            if provider.parse is None:
+                results = list(payload)
+            elif looks_blocked(payload):
+                outcomes.append(
+                    ProviderOutcome(
+                        provider.name,
+                        "blocked",
+                        detail="200 response was a challenge or empty page "
+                               "({} bytes)".format(len(payload)),
+                    )
+                )
+                continue
+            else:
+                results = provider.parse(payload)
+        except Exception as exc:  # network, HTTP status, or malformed payload
+            outcomes.append(
+                ProviderOutcome(provider.name, "error", detail="{}".format(exc)[:300])
+            )
+            continue
+
+        if results:
+            outcomes.append(ProviderOutcome(provider.name, "ok", rows=len(results)))
+            return results, outcomes
+
+        outcomes.append(
+            ProviderOutcome(
+                provider.name, "empty", detail="responded normally with no results"
+            )
+        )
+
+    if not any(o.status in ("ok", "empty") for o in outcomes):
+        raise SearchError(
+            "no search provider returned results -> "
+            + "; ".join(str(o) for o in outcomes)
+        )
+    return [], outcomes
 
 
 def search(
@@ -254,26 +534,5 @@ def search(
     timeout: float = 15.0,
     pause: float = 1.0,
 ) -> List[SearchResult]:
-    """Run ``query`` against the configured providers and return result nodes.
-
-    Providers are tried in order until one returns usable rows; a short pause
-    between provider attempts keeps request rates polite.  Raises
-    :class:`SearchError` only when every provider raised a transport error.
-    """
-    session = session or requests.Session()
-    errors: List[str] = []
-
-    for index, (name, fetch, parse) in enumerate(PROVIDERS):
-        if index and pause:
-            time.sleep(pause)
-        try:
-            results = parse(fetch(session, query, timeout))
-        except Exception as exc:  # network, HTTP status, or malformed markup
-            errors.append("{}: {}".format(name, exc))
-            continue
-        if results:
-            return results
-
-    if errors and len(errors) == len(PROVIDERS):
-        raise SearchError("all search providers failed -> " + "; ".join(errors))
-    return []
+    """Run ``query`` against the configured providers and return result nodes."""
+    return search_detailed(query, session=session, timeout=timeout, pause=pause)[0]

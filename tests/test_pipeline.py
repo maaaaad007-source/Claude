@@ -1,7 +1,7 @@
 import pytest
 
 from executive_finder import pipeline
-from executive_finder.search import SearchError, SearchResult
+from executive_finder.search import ProviderOutcome, SearchError, SearchResult
 
 CEO_RESULT = SearchResult(
     title="Daniel Ek - Chief Executive Officer - Spotify | LinkedIn",
@@ -28,7 +28,8 @@ def _stub_search(results_by_call):
 
     def fake_search(query, session=None, timeout=15.0, pause=1.0):
         calls["queries"].append(query)
-        return results_by_call
+        outcome = ProviderOutcome("stub", "ok", rows=len(results_by_call))
+        return results_by_call, [outcome]
 
     return fake_search, calls
 
@@ -40,7 +41,7 @@ def no_sleep(monkeypatch):
 
 def test_find_contacts_builds_the_six_column_matrix(monkeypatch):
     fake_search, calls = _stub_search([CEO_RESULT, DESIGN_RESULT, COMPANY_PAGE, UNRELATED])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts(
         "Spotify", domain="spotify.com", country="Sweden",
@@ -66,7 +67,7 @@ def test_find_contacts_builds_the_six_column_matrix(monkeypatch):
 
 def test_designation_is_classified_independently_of_the_query_category(monkeypatch):
     fake_search, _ = _stub_search([DESIGN_RESULT])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts(
         "Spotify", categories=["CEO / Executive"], pause=0
@@ -76,7 +77,7 @@ def test_designation_is_classified_independently_of_the_query_category(monkeypat
 
 def test_results_are_deduplicated_across_categories(monkeypatch):
     fake_search, calls = _stub_search([CEO_RESULT])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts(
         "Spotify", categories=["CEO / Executive", "Design Director"], pause=0
@@ -87,7 +88,7 @@ def test_results_are_deduplicated_across_categories(monkeypatch):
 
 def test_domain_defaults_to_company_slug(monkeypatch):
     fake_search, _ = _stub_search([CEO_RESULT])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts("Spotify", categories=["CEO / Executive"], pause=0)
     assert contacts[0].estimated_email == "daniel.ek@spotify.com"
@@ -95,7 +96,7 @@ def test_domain_defaults_to_company_slug(monkeypatch):
 
 def test_max_per_category_is_respected(monkeypatch):
     fake_search, _ = _stub_search([CEO_RESULT, DESIGN_RESULT])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts(
         "Spotify", categories=["CEO / Executive"], max_per_category=1, pause=0
@@ -110,7 +111,7 @@ def test_require_company_filters_unmatched_rows(monkeypatch):
         snippet="Northvolt · Stockholm",
     )
     fake_search, _ = _stub_search([CEO_RESULT, stray])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     contacts = pipeline.find_contacts(
         "Spotify", categories=["CEO / Executive"], require_company=True, pause=0
@@ -120,7 +121,7 @@ def test_require_company_filters_unmatched_rows(monkeypatch):
 
 def test_progress_hook_is_called(monkeypatch):
     fake_search, _ = _stub_search([])
-    monkeypatch.setattr(pipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline, "search_detailed", fake_search)
 
     seen = []
     pipeline.find_contacts(
@@ -135,7 +136,7 @@ def test_provider_failure_surfaces_when_nothing_was_found(monkeypatch):
     def failing_search(*_args, **_kwargs):
         raise SearchError("all search providers failed")
 
-    monkeypatch.setattr(pipeline, "search", failing_search)
+    monkeypatch.setattr(pipeline, "search_detailed", failing_search)
     with pytest.raises(SearchError):
         pipeline.find_contacts("Spotify", categories=["CEO / Executive"], pause=0)
 

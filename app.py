@@ -15,16 +15,38 @@ from executive_finder import (
     EMAIL_PATTERNS,
     SearchError,
     contacts_to_records,
-    find_contacts,
     normalise_domain,
 )
 from executive_finder.emails import DEFAULT_PATTERN
+from executive_finder.pipeline import find_contacts_detailed, split_company_input
+from executive_finder.search import api_key, configure_api_keys
 
 st.set_page_config(
     page_title="Executive Contact Finder",
     page_icon="🎯",
     layout="wide",
 )
+
+
+def _load_api_keys() -> None:
+    """Pick up search API credentials from Streamlit secrets, if present.
+
+    Hosted deployments share a datacenter IP that search engines block far
+    more aggressively than a home connection, so a key is the only reliable
+    path there.  Absent one the app still runs on the scraped providers.
+    """
+    def _secret(name: str) -> str:
+        # st.secrets raises on *lookup*, not on attribute access, and raises
+        # when no secrets.toml exists at all — so each read must be guarded.
+        try:
+            return str(st.secrets[name])
+        except Exception:
+            return ""
+
+    configure_api_keys(serper=_secret("SERPER_API_KEY"), brave=_secret("BRAVE_API_KEY"))
+
+
+_load_api_keys()
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -43,7 +65,7 @@ def _cached_search(
     ``_progress`` is underscore-prefixed so Streamlit leaves it out of the
     cache key — the callback differs on every rerun but the results do not.
     """
-    contacts = find_contacts(
+    contacts, report = find_contacts_detailed(
         company=company,
         domain=domain,
         country=country,
@@ -53,7 +75,69 @@ def _cached_search(
         require_company=require_company,
         progress=_progress,
     )
-    return contacts_to_records(contacts)
+    return contacts_to_records(contacts), report
+
+
+def _render_api_key_help() -> None:
+    """Explain the one fix that reliably works on a hosted deployment."""
+    if api_key("serper") or api_key("brave"):
+        st.caption(
+            "A search API key is configured but still did not return results — "
+            "check the key is valid and has quota remaining."
+        )
+        return
+
+    st.markdown(
+        """
+**Why this happens:** scraping search-engine HTML works from a home
+connection but is blocked from shared datacenter IPs — which is exactly what
+Streamlit Community Cloud runs on. Every app on that host shares the same
+outbound addresses, so search engines challenge them by default.
+
+**The fix — add a search API key** (both have free tiers):
+
+1. Get a key from [serper.dev](https://serper.dev) (2,500 free queries) or
+   [Brave Search API](https://brave.com/search/api/).
+2. In your app on Streamlit Cloud: **Manage app → Settings → Secrets**.
+3. Paste one line and save — the app restarts automatically:
+
+```toml
+SERPER_API_KEY = "your-key-here"
+```
+
+The app picks the key up on the next run and routes queries through the API
+instead of scraping. Running locally with `streamlit run app.py` also works
+without a key, since your home IP is not blocked.
+"""
+    )
+
+
+def _render_diagnostics(report, expanded: bool = False) -> None:
+    """Show what each provider did and where the rows went."""
+    with st.expander("Run diagnostics", expanded=expanded):
+        st.caption(report.summary())
+
+        if report.outcomes:
+            st.write("**Search providers**")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Provider": o.name,
+                            "Status": o.status,
+                            "Rows": o.rows,
+                            "Detail": o.detail,
+                        }
+                        for o in report.outcomes
+                    ]
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        if report.queries:
+            st.write("**Queries issued**")
+            st.code("\n".join(report.queries), language="text")
 
 
 def main() -> None:
@@ -122,6 +206,16 @@ def main() -> None:
         st.error("Select at least one role category in the sidebar.")
         return
 
+    # A domain typed into the company field poisons every query, so recover it.
+    resolved_company, resolved_input_domain = split_company_input(company, domain)
+    if resolved_company.lower() != company.strip().lower():
+        st.info(
+            "Searching for **{}** — the Company Name field looked like a domain, "
+            "so it was split into a company name and a mail domain.".format(
+                resolved_company
+            )
+        )
+
     status = st.empty()
     bar = st.progress(0.0)
 
@@ -131,7 +225,7 @@ def main() -> None:
 
     with st.spinner("Running X-Ray queries against public profile indexes…"):
         try:
-            records = _cached_search(
+            records, report = _cached_search(
                 company.strip(),
                 domain.strip(),
                 country.strip(),
@@ -143,10 +237,13 @@ def main() -> None:
             )
         except SearchError as exc:
             st.error(
-                "Every search provider refused the request — this usually means "
-                "rate limiting. Wait a minute and try again."
+                "**Blocked by the search providers** — no provider returned "
+                "results. This is the usual outcome on shared cloud IPs; see "
+                "the fix below."
             )
-            st.caption(str(exc))
+            _render_api_key_help()
+            with st.expander("Provider detail"):
+                st.code(str(exc), language="text")
             return
         except ValueError as exc:
             st.error(str(exc))
@@ -156,15 +253,34 @@ def main() -> None:
             status.empty()
 
     if not records:
-        st.warning(
-            "No executive profiles matched. Try a broader company name, drop the "
-            "country filter, or widen the role categories."
-        )
+        if report.blocked:
+            st.error(
+                "**Blocked by the search providers.** They answered, but with a "
+                "bot-challenge page rather than results — so this is not "
+                "'nothing matched', it's 'we were refused'."
+            )
+            _render_api_key_help()
+        elif not report.raw_results:
+            st.warning(
+                "The search providers returned no results at all for these "
+                "queries. Try a broader company name or drop the country filter."
+            )
+        else:
+            st.warning(
+                "Found {} search results, but none survived filtering. {}".format(
+                    report.raw_results, report.summary()
+                )
+            )
+            st.caption(
+                "If everything was dropped as off-target, the company name may not "
+                "appear in profile headlines — try the company's common short name."
+            )
+        _render_diagnostics(report, expanded=True)
         return
 
     frame = pd.DataFrame(records, columns=COLUMNS)
 
-    resolved_domain = normalise_domain(domain, company)
+    resolved_domain = normalise_domain(resolved_input_domain, resolved_company)
     top, mid, tail = st.columns(3)
     top.metric("Contacts found", len(frame))
     mid.metric("Categories covered", frame["Category"].nunique())
@@ -186,10 +302,12 @@ def main() -> None:
         "Download CSV",
         frame.to_csv(index=False).encode("utf-8"),
         file_name="{}_executive_contacts.csv".format(
-            company.strip().lower().replace(" ", "_")
+            resolved_company.lower().replace(" ", "_")
         ),
         mime="text/csv",
     )
+
+    _render_diagnostics(report)
 
 
 if __name__ == "__main__":
