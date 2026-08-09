@@ -49,6 +49,7 @@ THEME = """
 <style>
 :root {
   --accent:     #6B9080;
+  --accent-alt: #D98494;
   --accent-soft:#EDF2F0;
   --on-accent:  #FFFFFF;
   --ink:        #1F2430;
@@ -71,11 +72,40 @@ THEME = """
 [data-testid="stAppDeployButton"], #MainMenu, footer {
   display: none !important;
 }
+/* The control that reopens the sidebar sits bottom-left, out of the way of
+   the header, and is pinned visible so no chrome rule can strand it. */
 [data-testid="stExpandSidebarButton"] {
   display: flex !important;
   visibility: visible !important;
   opacity: 1 !important;
+  position: fixed !important;
+  top: auto !important;
+  bottom: 1.1rem !important;
+  left: 1.1rem !important;
+  z-index: 1000000 !important;
+  background: #fff !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 999px !important;
+  padding: .3rem !important;
 }
+
+/* Streamlit Cloud injects its own "Manage app" control into the page. */
+[data-testid="manage-app-button"], #ManageAppButton,
+.viewerBadge_container__1QSob, [class*="viewerBadge"] {
+  display: none !important;
+}
+
+/* Wordmark. Recreated in type rather than shipped as an image so it stays
+   crisp at any size and needs no asset. */
+.brand {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.9rem;
+  letter-spacing: -.015em;
+  margin: 0 0 1.4rem 0;
+  line-height: 1;
+}
+.brand .a { color: var(--accent); }
+.brand .b { color: var(--accent-alt); }
 
 html, body, [class*="css"] { color: var(--ink); }
 
@@ -427,6 +457,12 @@ def _render_sidebar() -> dict:
 def main() -> None:
     _inject_theme()
     options = _render_sidebar()
+
+    st.markdown(
+        '<div class="brand"><span class="a">contact</span>'
+        '<span class="b">finder</span></div>',
+        unsafe_allow_html=True,
+    )
 
     with st.form("search_panel"):
         left, middle, right = st.columns(3)
