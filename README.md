@@ -31,7 +31,7 @@ Press **Extract Real Executive Contacts** to render the output matrix:
 | Full Name | Human name parsed from the profile header | `Jim Rowan` |
 | Designation | Exact corporate job title | `Chief Executive Officer at Volvo Cars` |
 | Email | Real address where one can be found, otherwise a guess | `jrowan@volvocars.com` |
-| Email Source | Provenance of that address | `Verified — Hunter directory · 97%` |
+| Email Source | Provenance of that address | `Verified · 97%` |
 | Country | Specified region filter | `Sweden` |
 | Category | Departmental role classification | `CEO / Executive` |
 | LinkedIn Profile | Link to the individual's profile | `Open Profile` |
@@ -197,11 +197,11 @@ always states which tier produced a given address.
 
 | Tier | Source | Needs |
 | :--- | :--- | :--- |
-| 1 | `Verified — Hunter directory` — Hunter has this exact address | Hunter key |
-| 2 | `Found — Hunter lookup` — per-person resolution | Hunter key, opt-in |
-| 3 | `Guess — company's own pattern` — Hunter reported the company's shape | Hunter key |
-| 4 | `Guess — pattern inferred from public addresses` — mined for free | nothing |
-| 5 | `Guess — default pattern` — nothing better was available | nothing |
+| 1 | `Verified` — Hunter has this exact address | Hunter key |
+| 2 | `Found` — per-person resolution | Hunter key, opt-in |
+| 3 | `Guess · company pattern` — Hunter reported the company's shape | Hunter key |
+| 4 | `Guess · inferred pattern` — mined from public addresses, free | nothing |
+| 5 | `Guess · default pattern` — nothing better was available | nothing |
 
 ### Free pattern discovery (no API key)
 

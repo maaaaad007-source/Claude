@@ -176,7 +176,7 @@ def test_discovered_pattern_is_applied_without_any_hunter_key(monkeypatch):
     assert rows["Jim Rowan"].estimated_email == "jrowan@volvocars.com"
     assert rows["Anna Berg"].estimated_email == "aberg@volvocars.com"
     for contact in contacts:
-        assert "inferred from public addresses" in contact.email_source
+        assert "inferred pattern" in contact.email_source
     assert report.discovered_pattern == "{f}{last}"
 
 
@@ -224,7 +224,7 @@ def test_hunter_pattern_outranks_a_discovered_one(monkeypatch):
     )
     # Hunter's observed pattern wins over the inferred one.
     assert contacts[0].estimated_email == "jrowan@volvocars.com"
-    assert "company's own pattern" in contacts[0].email_source
+    assert "company pattern" in contacts[0].email_source
 
 
 def test_discovery_can_be_switched_off(monkeypatch):

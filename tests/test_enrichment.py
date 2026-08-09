@@ -254,7 +254,7 @@ def test_pipeline_uses_hunter_addresses_and_reports_provenance(monkeypatch):
     assert "Verified" in rows["Jim Rowan"].email_source
     # Unknown person still benefits from the company's real pattern.
     assert rows["Anna Berg"].estimated_email == "aberg@volvocars.com"
-    assert "company's own pattern" in rows["Anna Berg"].email_source
+    assert "company pattern" in rows["Anna Berg"].email_source
 
     assert report.emails_observed == 1
     assert report.emails_guessed == 1

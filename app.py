@@ -1,7 +1,7 @@
 """Executive Contact Finder — Streamlit application.
 
-Top control panel takes a company (required), an optional domain and an
-optional country, then renders the six-column executive contact matrix.
+A company, an optional domain and an optional country produce a table of
+executives with their titles, best-available email address and profile link.
 """
 
 from __future__ import annotations
@@ -25,12 +25,135 @@ from executive_finder.pipeline import find_contacts_detailed, split_company_inpu
 from executive_finder.search import api_key, configure_api_keys
 
 st.set_page_config(
-    page_title="Executive Contact Finder",
-    page_icon="🎯",
+    page_title="Contact Finder",
+    page_icon="◆",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 
+# --------------------------------------------------------------------------- #
+# Theme
+# --------------------------------------------------------------------------- #
+THEME = """
+<style>
+:root {
+  --accent:  #F5C518;
+  --accent-ink: #1F2430;
+  --ink:     #1F2430;
+  --muted:   #8A90A0;
+  --line:    #ECEEF2;
+  --panel:   #FAFBFC;
+}
+
+/* Streamlit's own chrome competes with the page's own header. */
+[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"] {
+  display: none !important;
+}
+
+html, body, [class*="css"] { color: var(--ink); }
+
+[data-testid="stMainBlockContainer"], .block-container {
+  padding: 2.75rem 3rem 4rem !important;
+  max-width: 1240px;
+}
+
+/* Sidebar: quiet surface, hairline separation, no heavy headers. */
+[data-testid="stSidebar"] {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+  padding-top: 1.5rem;
+}
+[data-testid="stSidebar"] label { font-size: .82rem; color: var(--muted); }
+[data-testid="stSidebar"] hr { margin: 1.1rem 0; border-color: var(--line); }
+
+.wordmark {
+  display: flex; align-items: center; gap: .55rem;
+  font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em;
+  margin: 0 0 1.6rem 0;
+}
+.wordmark span.mark {
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--accent); display: inline-block;
+}
+
+/* Section heading above the results table. */
+.section-title {
+  font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em;
+  margin: .4rem 0 .2rem;
+}
+.section-sub { color: var(--muted); font-size: .86rem; margin-bottom: 1rem; }
+
+/* Inputs */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+  border-radius: 10px !important;
+  border: 1px solid var(--line) !important;
+  background: #fff !important;
+  padding: .6rem .85rem !important;
+}
+[data-testid="stTextInput"] input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(245,197,24,.18) !important;
+}
+
+/* Buttons: pill, amber, dark ink. */
+.stButton > button, [data-testid="stFormSubmitButton"] > button {
+  border-radius: 999px !important;
+  border: 1px solid var(--line) !important;
+  padding: .58rem 1.4rem !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+[data-testid="stFormSubmitButton"] > button {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-ink) !important;
+}
+[data-testid="stFormSubmitButton"] > button:hover { filter: brightness(.96); }
+
+/* Cards and the results table share one hairline language. */
+[data-testid="stForm"],
+[data-testid="stExpander"] details,
+[data-testid="stDataFrame"] {
+  border: 1px solid var(--line) !important;
+  border-radius: 14px !important;
+  background: #fff;
+}
+[data-testid="stForm"] { padding: 1.35rem 1.5rem 1.15rem !important; }
+[data-testid="stExpander"] details { background: var(--panel); }
+[data-testid="stExpander"] summary { font-size: .88rem; font-weight: 600; }
+
+/* Alerts: flat tints rather than saturated blocks. */
+[data-testid="stAlert"] { border-radius: 12px; border: 1px solid var(--line); }
+
+/* Role chips. Two defects to correct, both addressed structurally because the
+   emotion class hashes change between Streamlit releases:
+   the chip container clips its own contents once every role is selected, and
+   the chips inherit the accent as a fill with white text, which fails
+   contrast against a light accent. */
+[data-testid="stMultiSelect"] * { max-height: none !important; }
+[data-testid="stMultiSelect"] span { color: var(--ink) !important; }
+
+.empty-state {
+  color: var(--muted); font-size: .88rem;
+  padding: 3.5rem 0; text-align: center;
+}
+
+.build-stamp { color: var(--muted); font-size: .74rem; margin-top: .5rem; }
+</style>
+"""
+
+
+def _inject_theme() -> None:
+    st.markdown(THEME, unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# Credentials
+# --------------------------------------------------------------------------- #
 def _secret(name: str) -> str:
     """Read one Streamlit secret, tolerating the absence of any secrets file.
 
@@ -70,6 +193,9 @@ def _resolve_api_keys() -> str:
     return "deployment" if deployment else ""
 
 
+# --------------------------------------------------------------------------- #
+# Search
+# --------------------------------------------------------------------------- #
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_search(
     company: str,
@@ -121,33 +247,25 @@ def _render_api_key_help() -> None:
 
     st.markdown(
         """
-**Why this happens:** scraping search-engine HTML works from a home
-connection but is blocked from shared datacenter IPs — which is exactly what
-Streamlit Community Cloud runs on. Every app on that host shares the same
-outbound addresses, so search engines challenge them by default.
+Search engines block the shared IPs that hosted deployments run on, so scraped
+providers get a bot challenge instead of results.
 
-**Fastest fix — paste a key in the sidebar.** Open the sidebar (the **»**
-arrow, top-left), scroll to **Search API key**, paste, and search again. Get a
-free key at [serper.dev](https://serper.dev) — 2,500 queries, no card needed.
-The key lasts for this browser session.
+**Fastest fix:** open the sidebar → **API keys** → paste a
+[serper.dev](https://serper.dev) key (free, 2,500 queries) → press Enter.
 
-**To make it permanent**, add it to your app's Secrets instead:
-[share.streamlit.io](https://share.streamlit.io) → the **⋮** menu beside your
-app → **Settings** → **Secrets** →
+**Permanent fix:** [share.streamlit.io](https://share.streamlit.io) → the **⋮**
+beside your app → **Settings** → **Secrets** →
 
 ```toml
 SERPER_API_KEY = "your-key-here"
 ```
-
-Running locally with `streamlit run app.py` needs no key at all — your home IP
-is not blocked.
 """
     )
 
 
 def _render_diagnostics(report, expanded: bool = False) -> None:
     """Show what each provider did and where the rows went."""
-    with st.expander("Run diagnostics", expanded=expanded):
+    with st.expander("Diagnostics", expanded=expanded):
         st.caption(report.summary())
         if report.enrichment_note:
             st.caption("**Email lookup:** " + report.enrichment_note)
@@ -155,7 +273,6 @@ def _render_diagnostics(report, expanded: bool = False) -> None:
             st.caption("**Pattern discovery:** " + report.pattern_note)
 
         if report.outcomes:
-            st.write("**Search providers**")
             st.dataframe(
                 pd.DataFrame(
                     [
@@ -173,173 +290,147 @@ def _render_diagnostics(report, expanded: bool = False) -> None:
             )
 
         if report.queries:
-            st.write("**Queries issued**")
             st.code("\n".join(report.queries), language="text")
 
 
+# --------------------------------------------------------------------------- #
+# Sidebar
+# --------------------------------------------------------------------------- #
+def _render_sidebar() -> dict:
+    """Draw the settings rail and return the chosen options.
+
+    Everything optional lives inside a collapsed expander so the resting state
+    is four controls, not twenty.
+    """
+    with st.sidebar:
+        st.markdown(
+            '<div class="wordmark"><span class="mark"></span>contactfinder</div>',
+            unsafe_allow_html=True,
+        )
+
+        categories = st.multiselect(
+            "Roles", CATEGORIES, default=CATEGORIES, label_visibility="visible"
+        )
+        max_per_category = st.slider("Results per role", 1, 25, 10)
+        country_filter = st.radio(
+            "Country match",
+            options=["strict", "relaxed", "off"],
+            index=0,
+            horizontal=True,
+            format_func=str.capitalize,
+            help="Strict requires country evidence on each result. Relaxed drops "
+                 "only clear mismatches. Off keeps every market.",
+        )
+
+        st.divider()
+
+        with st.expander("Email lookup"):
+            st.text_input(
+                "Hunter.io key",
+                key="hunter_api_key",
+                type="password",
+                placeholder="optional",
+                help="Returns real, observed addresses instead of guesses.",
+            )
+            hunter_key = (
+                st.session_state.get("hunter_api_key", "").strip()
+                or _configured_key("HUNTER_API_KEY")
+            )
+            discover_patterns = st.checkbox(
+                "Infer pattern from published addresses", value=True,
+                help="Free. Derives the company's real address shape, which "
+                     "fixes every guessed row at once.",
+            )
+            use_email_finder = st.checkbox(
+                "Look up each person individually", value=False,
+                disabled=not hunter_key,
+                help="Spends one Hunter credit per person.",
+            )
+            if hunter_key:
+                email_pattern = DEFAULT_PATTERN
+                st.caption("Hunter key active.")
+            else:
+                email_pattern = st.selectbox(
+                    "Fallback pattern",
+                    list(EMAIL_PATTERNS),
+                    index=list(EMAIL_PATTERNS).index(DEFAULT_PATTERN),
+                )
+
+        with st.expander("API keys"):
+            st.text_input(
+                "Serper key",
+                key="session_api_key",
+                type="password",
+                placeholder="optional if set in Secrets",
+                help="Needed on hosted deployments, whose shared IP search "
+                     "engines block. Press Enter to apply.",
+            )
+            key_source = _resolve_api_keys()
+            if key_source == "deployment":
+                st.caption("✅ Active — loaded from app configuration.")
+            elif key_source:
+                st.caption("✅ Active — entered this session.")
+            else:
+                st.caption("⚠️ None set. Hosted runs will likely be blocked.")
+
+        with st.expander("Advanced"):
+            require_company = st.checkbox(
+                "Only keep results naming the company", value=False
+            )
+
+        st.markdown(
+            '<div class="build-stamp">Addresses are predicted unless marked '
+            "verified · v{}</div>".format(__version__),
+            unsafe_allow_html=True,
+        )
+
+    return {
+        "categories": categories,
+        "max_per_category": max_per_category,
+        "country_filter": country_filter,
+        "hunter_key": hunter_key,
+        "discover_patterns": discover_patterns,
+        "use_email_finder": use_email_finder,
+        "email_pattern": email_pattern,
+        "require_company": require_company,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Page
+# --------------------------------------------------------------------------- #
 def main() -> None:
-    st.title("🎯 Executive Contact Finder")
-    st.caption(
-        "Discover executive names, exact job titles, predicted corporate email "
-        "addresses and direct LinkedIn profile links for a target company and region."
-    )
+    _inject_theme()
+    options = _render_sidebar()
 
     with st.form("search_panel"):
         left, middle, right = st.columns(3)
-        company = left.text_input(
-            "Company Name *",
-            placeholder="Volvo, Spotify, IKEA…",
-            help="Required. The target organisation.",
-        )
-        domain = middle.text_input(
-            "Company Domain",
-            placeholder="spotify.com",
-            help="Optional. Defaults to companyname.com when left blank.",
-        )
-        country = right.text_input(
-            "Country",
-            placeholder="Sweden, United Kingdom, United States…",
-            help="Optional. Target market or regional headquarters.",
-        )
-        submitted = st.form_submit_button(
-            "Extract Real Executive Contacts",
-            type="primary",
-            use_container_width=True,
-        )
-
-    with st.sidebar:
-        st.header("Search settings")
-        categories = st.multiselect(
-            "Role categories", CATEGORIES, default=CATEGORIES,
-        )
-        max_per_category = st.slider("Max results per category", 1, 25, 10)
-        require_company = st.checkbox(
-            "Only keep results that name the company",
-            value=False,
-            help="Stricter filter — fewer rows, less noise.",
-        )
-
-        st.divider()
-        st.subheader("Country filter")
-        country_filter = st.radio(
-            "How strictly to enforce the country",
-            options=["strict", "relaxed", "off"],
-            index=0,
-            format_func=lambda mode: {
-                "strict": "Strict — must show country evidence",
-                "relaxed": "Relaxed — drop only clear mismatches",
-                "off": "Off — keep every market",
-            }[mode],
-            help="The country in the query is only a ranking hint, so results "
-                 "from other markets leak through. This filters on the LinkedIn "
-                 "locale subdomain plus country and city mentions.",
-        )
-
-        st.divider()
-        st.subheader("Email lookup")
-        st.text_input(
-            "Hunter.io API key",
-            key="hunter_api_key",
-            type="password",
-            placeholder="paste key here",
-            help="Optional. Returns real, verified addresses instead of guesses. "
-                 "Held for this browser session only.",
-        )
-        hunter_key = (
-            st.session_state.get("hunter_api_key", "").strip()
-            or _configured_key("HUNTER_API_KEY")
-        )
-        discover_patterns = st.checkbox(
-            "Infer the pattern from published addresses",
-            value=True,
-            help="Free. Searches for addresses the company has published and "
-                 "derives its real pattern, which fixes every guessed row at "
-                 "once. Costs one extra search query per run.",
-        )
-        use_email_finder = st.checkbox(
-            "Look up each person individually",
-            value=False,
-            disabled=not hunter_key,
-            help="Slower and spends one Hunter credit per person, but resolves "
-                 "executives the bulk domain search did not already cover.",
-        )
-        if hunter_key:
-            st.success("Hunter key active — real addresses where available.",
-                       icon="✅")
-        else:
-            st.caption(
-                "Without a Hunter key addresses are **guesses**. Pattern "
-                "discovery below makes those guesses follow the company's own "
-                "convention rather than an assumed one."
-            )
-            email_pattern = st.selectbox(
-                "Guess pattern",
-                list(EMAIL_PATTERNS),
-                index=list(EMAIL_PATTERNS).index(DEFAULT_PATTERN),
-                help="Address shape assumed when no real address can be found.",
-            )
-
-        if hunter_key:
-            email_pattern = DEFAULT_PATTERN
-
-        st.divider()
-        st.subheader("Search API key")
-        st.text_input(
-            "Serper API key",
-            key="session_api_key",
-            type="password",
-            placeholder="paste key here",
-            help="Needed on hosted deployments, where search engines block the "
-                 "shared server IP. Held for this browser session only.",
-        )
-        key_source = _resolve_api_keys()
-        if key_source == "deployment":
-            st.success("Search API key active — loaded from this app's "
-                       "configuration. Nothing to enter.", icon="✅")
-        elif key_source:
-            st.success("Search API key active — entered this session.", icon="✅")
-            st.caption(
-                "Add it to the app's Secrets to stop re-entering it — see the "
-                "README, *Hosted deployments need an API key*."
-            )
-        else:
-            st.warning("No API key — hosted runs will likely be blocked.", icon="⚠️")
-            st.caption(
-                "After pasting, press **Enter** (or tap outside the box) — "
-                "Streamlit only applies the value once the field is committed."
-            )
-
-        st.divider()
-        st.caption(
-            "Emails are **predicted** from public naming conventions, not "
-            "verified. Confirm before outreach and follow GDPR/CAN-SPAM rules "
-            "in your market."
-        )
-        # Build stamp: makes a stale deployment obvious at a glance instead of
-        # leaving "my fix isn't there" as a guess.
-        st.caption("Build v{}".format(__version__))
+        company = left.text_input("Company", placeholder="Volvo Cars")
+        domain = middle.text_input("Domain", placeholder="volvocars.com")
+        country = right.text_input("Country", placeholder="Sweden")
+        submitted = st.form_submit_button("Find contacts", type="primary")
 
     if not submitted:
-        st.info("Enter a company name above and run the extraction to begin.")
+        st.markdown(
+            '<div class="empty-state">Enter a company to find its executives.</div>',
+            unsafe_allow_html=True,
+        )
         return
 
     if not company.strip():
-        st.error("Company Name is required.")
+        st.error("Company is required.")
         return
 
-    if not categories:
-        st.error("Select at least one role category in the sidebar.")
+    if not options["categories"]:
+        st.error("Select at least one role in the sidebar.")
         return
 
     # A domain typed into the company field poisons every query, so recover it.
     resolved_company, resolved_input_domain = split_company_input(company, domain)
     if resolved_company.lower() != company.strip().lower():
-        st.info(
-            "Searching for **{}** — the Company Name field looked like a domain, "
-            "so it was split into a company name and a mail domain.".format(
-                resolved_company
-            )
-        )
+        st.info("Searching for **{}** — that looked like a domain.".format(
+            resolved_company
+        ))
 
     status = st.empty()
     bar = st.progress(0.0)
@@ -348,86 +439,65 @@ def main() -> None:
         status.caption(message)
         bar.progress(min(max(fraction, 0.0), 1.0))
 
-    with st.spinner("Running X-Ray queries against public profile indexes…"):
-        try:
-            records, report = _cached_search(
-                company.strip(),
-                domain.strip(),
-                country.strip(),
-                tuple(categories),
-                email_pattern,
-                max_per_category,
-                require_company,
-                bool(api_key("serper") or api_key("brave")),
-                country_filter,
-                hunter_key,
-                use_email_finder,
-                discover_patterns,
-                _progress=progress,
-            )
-        except SearchError as exc:
-            st.error(
-                "**Blocked by the search providers** — no provider returned "
-                "results. This is the usual outcome on shared cloud IPs; see "
-                "the fix below."
-            )
-            _render_api_key_help()
-            with st.expander("Provider detail"):
-                st.code(str(exc), language="text")
-            return
-        except ValueError as exc:
-            st.error(str(exc))
-            return
-        finally:
-            bar.empty()
-            status.empty()
+    try:
+        records, report = _cached_search(
+            company.strip(),
+            domain.strip(),
+            country.strip(),
+            tuple(options["categories"]),
+            options["email_pattern"],
+            options["max_per_category"],
+            options["require_company"],
+            bool(api_key("serper") or api_key("brave")),
+            options["country_filter"],
+            options["hunter_key"],
+            options["use_email_finder"],
+            options["discover_patterns"],
+            _progress=progress,
+        )
+    except SearchError as exc:
+        st.error("Blocked by the search providers — none returned results.")
+        _render_api_key_help()
+        with st.expander("Provider detail"):
+            st.code(str(exc), language="text")
+        return
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    finally:
+        bar.empty()
+        status.empty()
 
     if not records:
         if report.blocked:
-            st.error(
-                "**Blocked by the search providers.** They answered, but with a "
-                "bot-challenge page rather than results — so this is not "
-                "'nothing matched', it's 'we were refused'."
-            )
+            st.error("Blocked by the search providers — they answered with a "
+                     "bot challenge rather than results.")
             _render_api_key_help()
         elif not report.raw_results:
-            st.warning(
-                "The search providers returned no results at all for these "
-                "queries. Try a broader company name or drop the country filter."
-            )
+            st.warning("No results for these queries. Try a broader company "
+                       "name or drop the country.")
         else:
             st.warning(
-                "Found {} search results, but none survived filtering. {}".format(
-                    report.raw_results, report.summary()
+                "Found {} results, but none survived filtering.".format(
+                    report.raw_results
                 )
-            )
-            st.caption(
-                "If everything was dropped as off-target, the company name may not "
-                "appear in profile headlines — try the company's common short name."
             )
         _render_diagnostics(report, expanded=True)
         return
 
     frame = pd.DataFrame(records, columns=COLUMNS)
-
     resolved_domain = normalise_domain(resolved_input_domain, resolved_company)
-    first, second, third, fourth = st.columns(4)
-    first.metric("Contacts found", len(frame))
-    second.metric("Categories covered", frame["Category"].nunique())
-    third.metric(
-        "Real addresses",
-        "{} of {}".format(report.emails_observed, len(frame)),
-        help="Addresses Hunter actually observed, as opposed to pattern guesses.",
-    )
-    fourth.metric("Email domain", resolved_domain or "—")
 
+    summary = "{} contacts · {} verified · {}".format(
+        len(frame), report.emails_observed, resolved_domain or "no domain"
+    )
     if report.dropped_wrong_country:
-        st.caption(
-            "Country filter removed {} result(s) from other markets. "
-            "Relax it in the sidebar if you expected more.".format(
-                report.dropped_wrong_country
-            )
-        )
+        summary += " · {} filtered by country".format(report.dropped_wrong_country)
+
+    st.markdown('<div class="section-title">Results</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-sub">{}</div>'.format(summary), unsafe_allow_html=True
+    )
 
     st.dataframe(
         frame,
@@ -435,14 +505,14 @@ def main() -> None:
         hide_index=True,
         column_config={
             "LinkedIn Profile": st.column_config.LinkColumn(
-                "LinkedIn Profile", display_text="Open Profile"
+                "Profile", display_text="Open"
             ),
-            "Designation": st.column_config.TextColumn("Designation", width="large"),
+            "Designation": st.column_config.TextColumn("Title", width="large"),
             "Email Source": st.column_config.TextColumn(
-                "Email Source",
+                "Source",
                 width="medium",
-                help="Verified/Found = observed by Hunter. Guess = derived from "
-                     "a naming pattern and not confirmed to exist.",
+                help="Verified/Found = observed. Guess = derived from a naming "
+                     "pattern and not confirmed to exist.",
             ),
         },
     )
@@ -450,7 +520,7 @@ def main() -> None:
     st.download_button(
         "Download CSV",
         frame.to_csv(index=False).encode("utf-8"),
-        file_name="{}_executive_contacts.csv".format(
+        file_name="{}_contacts.csv".format(
             resolved_company.lower().replace(" ", "_")
         ),
         mime="text/csv",

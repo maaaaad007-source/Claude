@@ -62,16 +62,18 @@ class EmailResult:
 
     def label(self) -> str:
         """Human-readable provenance for the results table."""
+        # Kept short so the results column reads at a glance, but every
+        # inferred address still carries the word "Guess".
         if self.source == SOURCE_DIRECTORY:
-            base = "Verified — Hunter directory"
+            base = "Verified"
         elif self.source == SOURCE_FINDER:
-            base = "Found — Hunter lookup"
+            base = "Found"
         elif self.source == SOURCE_COMPANY_PATTERN:
-            base = "Guess — company's own pattern"
+            base = "Guess · company pattern"
         elif self.source == SOURCE_DISCOVERED_PATTERN:
-            base = "Guess — pattern inferred from public addresses"
+            base = "Guess · inferred pattern"
         else:
-            base = "Guess — default pattern"
+            base = "Guess · default pattern"
         parts = [base]
         if self.confidence:
             parts.append("{}%".format(self.confidence))

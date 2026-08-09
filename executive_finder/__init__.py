@@ -6,7 +6,7 @@ from .pipeline import COLUMNS, Contact, contacts_to_records, find_contacts
 from .roles import CATEGORIES, ROLE_MATRIX, classify
 from .search import SearchError, build_query
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 
 __all__ = [
     "CATEGORIES",
