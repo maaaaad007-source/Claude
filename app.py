@@ -57,15 +57,30 @@ THEME = """
   --panel:      #FAFBFC;
 }
 
-/* Streamlit's own chrome competes with the page's own header. */
-[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"] {
+/* Keep the header element — it hosts the control that reopens a collapsed
+   sidebar — but strip it back to nothing visible and drop only the toolbar. */
+[data-testid="stHeader"] {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+/* stToolbar itself must stay displayed: the control that reopens a collapsed
+   sidebar is nested inside it, and hiding the toolbar renders that button at
+   zero size, stranding anyone who closes the sidebar. Hide its actions only. */
+[data-testid="stToolbarActions"], [data-testid="stMainMenu"],
+[data-testid="stAppDeployButton"], #MainMenu, footer {
   display: none !important;
+}
+[data-testid="stExpandSidebarButton"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 html, body, [class*="css"] { color: var(--ink); }
 
 [data-testid="stMainBlockContainer"], .block-container {
-  padding: 2.75rem 3rem 4rem !important;
+  padding: 1.25rem 3rem 4rem !important;
   max-width: 1240px;
 }
 
@@ -80,11 +95,6 @@ html, body, [class*="css"] { color: var(--ink); }
 [data-testid="stSidebar"] label { font-size: .82rem; color: var(--muted); }
 [data-testid="stSidebar"] hr { margin: 1.1rem 0; border-color: var(--line); }
 
-.wordmark {
-  display: flex; align-items: center; gap: .55rem;
-  font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em;
-  margin: 0 0 1.6rem 0;
-}
 
 /* Section heading above the results table. */
 .section-title {
@@ -95,7 +105,16 @@ html, body, [class*="css"] { color: var(--ink); }
 
 /* Inputs */
 /* Inputs share the card's border exactly — same token, same width — so the
-   panel reads as one surface rather than boxes inside a box. */
+   panel reads as one surface rather than boxes inside a box. Streamlit draws
+   its input outline as a box-shadow, which reads as a soft glow next to a
+   crisp 1px card edge, so shadows are cleared on the field and its wrapper. */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextInput"] > div,
+[data-testid="stTextInput"] div[class*="react-aria"] {
+  box-shadow: none !important;
+  outline: none !important;
+}
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {
   border-radius: 10px !important;
@@ -105,8 +124,9 @@ html, body, [class*="css"] { color: var(--ink); }
 }
 [data-testid="stTextInput"] input:focus {
   border-color: var(--accent) !important;
-  box-shadow: 0 0 0 3px rgba(107,144,128,.18) !important;
+  box-shadow: none !important;
 }
+[data-testid="stForm"] { box-shadow: none !important; }
 
 /* Buttons: pill, accent fill. */
 .stButton > button, [data-testid="stFormSubmitButton"] > button {
@@ -315,11 +335,6 @@ def _render_sidebar() -> dict:
     is four controls, not twenty.
     """
     with st.sidebar:
-        st.markdown(
-            '<div class="wordmark">contactfinder</div>',
-            unsafe_allow_html=True,
-        )
-
         categories = st.multiselect(
             "Roles", CATEGORIES, default=CATEGORIES, label_visibility="visible"
         )
