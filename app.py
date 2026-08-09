@@ -54,7 +54,6 @@ THEME = """
   --ink:        #1F2430;
   --muted:      #8A90A0;
   --line:       #ECEEF2;
-  --input-line: #D6DBE1;
   --panel:      #FAFBFC;
 }
 
@@ -95,10 +94,12 @@ html, body, [class*="css"] { color: var(--ink); }
 .section-sub { color: var(--muted); font-size: .86rem; margin-bottom: 1rem; }
 
 /* Inputs */
+/* Inputs share the card's border exactly — same token, same width — so the
+   panel reads as one surface rather than boxes inside a box. */
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {
   border-radius: 10px !important;
-  border: 1px solid var(--input-line) !important;
+  border: 1px solid var(--line) !important;
   background: #fff !important;
   padding: .6rem .85rem !important;
 }
