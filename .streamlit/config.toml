@@ -1,9 +1,8 @@
+# Only the brand colour is pinned. Background and text colours are left to
+# Streamlit so the viewer's System / Light / Dark choice actually takes effect;
+# setting them here would force one theme and make that control a no-op.
 [theme]
-base = "light"
 primaryColor = "#6B9080"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#FAFBFC"
-textColor = "#1F2430"
 
 [server]
 enableXsrfProtection = true
