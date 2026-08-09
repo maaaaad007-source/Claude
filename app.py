@@ -45,48 +45,35 @@ st.set_page_config(
 # --------------------------------------------------------------------------- #
 # Theme
 # --------------------------------------------------------------------------- #
-LIGHT_TOKENS = {
-    "ink": "#1F2430", "muted": "#8A90A0", "line": "#ECEEF2",
-    "panel": "#FAFBFC", "surface": "#FFFFFF", "accent_soft": "#EDF2F0",
-}
-DARK_TOKENS = {
-    "ink": "#E6E9F0", "muted": "#99A0AF", "line": "#2C313C",
-    "panel": "#161A21", "surface": "#1C2029", "accent_soft": "#24312C",
-}
-
-
-def _theme_css(dark: bool) -> str:
-    """Stylesheet for the viewer's chosen theme.
-
-    Every surface colour is a token so the Light/Dark control actually works.
-    Hard-coding white here would leave a dark viewer with white cards and
-    unreadable text, which is worse than offering no choice at all.
-    """
-    t = DARK_TOKENS if dark else LIGHT_TOKENS
-    return """
+THEME = """
 <style>
 :root {
   --accent:     #6B9080;
   --accent-alt: #D98494;
+  --accent-soft:#EDF2F0;
   --on-accent:  #FFFFFF;
-  --accent-soft:%(accent_soft)s;
-  --ink:        %(ink)s;
-  --muted:      %(muted)s;
-  --line:       %(line)s;
-  --panel:      %(panel)s;
-  --surface:    %(surface)s;
+  --ink:        #1F2430;
+  --muted:      #8A90A0;
+  --line:       #ECEEF2;
+  --panel:      #FAFBFC;
 }
 
-/* Keep the header and toolbar in the layout: the toolbar holds both the
-   sidebar-expand control and the theme menu. Only the deploy button goes. */
+/* Keep the header element — it hosts the control that reopens a collapsed
+   sidebar — but strip it back to nothing visible and drop only the toolbar. */
 [data-testid="stHeader"] {
   background: transparent !important;
   box-shadow: none !important;
   border: none !important;
 }
-[data-testid="stAppDeployButton"], footer { display: none !important; }
-
-/* The control that reopens the sidebar sits bottom-left, out of the way. */
+/* stToolbar itself must stay displayed: the control that reopens a collapsed
+   sidebar is nested inside it, and hiding the toolbar renders that button at
+   zero size, stranding anyone who closes the sidebar. Hide its actions only. */
+[data-testid="stToolbarActions"], [data-testid="stMainMenu"],
+[data-testid="stAppDeployButton"], #MainMenu, footer {
+  display: none !important;
+}
+/* The control that reopens the sidebar sits bottom-left, out of the way of
+   the header, and is pinned visible so no chrome rule can strand it. */
 [data-testid="stExpandSidebarButton"] {
   display: flex !important;
   visibility: visible !important;
@@ -96,19 +83,20 @@ def _theme_css(dark: bool) -> str:
   bottom: 1.1rem !important;
   left: 1.1rem !important;
   z-index: 1000000 !important;
-  background: var(--surface) !important;
+  background: #fff !important;
   border: 1px solid var(--line) !important;
   border-radius: 999px !important;
   padding: .3rem !important;
 }
 
-/* Streamlit Cloud's injected "Manage app" control, hidden by selector where
-   possible; a script handles the cases these miss. */
+/* Streamlit Cloud injects its own "Manage app" control into the page. */
 [data-testid="manage-app-button"], #ManageAppButton,
 .viewerBadge_container__1QSob, [class*="viewerBadge"] {
   display: none !important;
 }
 
+/* Wordmark. Recreated in type rather than shipped as an image so it stays
+   crisp at any size and needs no asset. */
 .brand {
   font-family: Georgia, "Times New Roman", serif;
   font-size: 1.9rem;
@@ -126,6 +114,7 @@ html, body, [class*="css"] { color: var(--ink); }
   max-width: 1240px;
 }
 
+/* Sidebar: quiet surface, hairline separation, no heavy headers. */
 [data-testid="stSidebar"] {
   background: var(--panel);
   border-right: 1px solid var(--line);
@@ -133,29 +122,22 @@ html, body, [class*="css"] { color: var(--ink); }
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
   padding-top: 1.5rem;
 }
-/* Widget labels and placeholders inherit Streamlit's own palette, which is
-   tuned for its default surfaces rather than these; set them from the tokens
-   so both themes stay legible. */
-[data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] * {
-  color: var(--ink) !important;
-}
-input::placeholder { color: var(--muted) !important; opacity: 1 !important; }
-[data-testid="stExpander"] summary,
-[data-testid="stExpander"] summary * { color: var(--ink) !important; }
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] * {
-  color: var(--muted) !important;
-}
 [data-testid="stSidebar"] label { font-size: .82rem; color: var(--muted); }
 [data-testid="stSidebar"] hr { margin: 1.1rem 0; border-color: var(--line); }
 
+
+/* Section heading above the results table. */
 .section-title {
   font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em;
   margin: .4rem 0 .2rem;
 }
 .section-sub { color: var(--muted); font-size: .86rem; margin-bottom: 1rem; }
 
-/* Inputs share the card's border exactly. Streamlit draws its input outline
-   as a box-shadow, which reads as a glow beside a crisp 1px edge. */
+/* Inputs */
+/* Inputs share the card's border exactly — same token, same width — so the
+   panel reads as one surface rather than boxes inside a box. Streamlit draws
+   its input outline as a box-shadow, which reads as a soft glow next to a
+   crisp 1px card edge, so shadows are cleared on the field and its wrapper. */
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input,
 [data-testid="stTextInput"] > div,
@@ -167,8 +149,7 @@ input::placeholder { color: var(--muted) !important; opacity: 1 !important; }
 [data-testid="stNumberInput"] input {
   border-radius: 10px !important;
   border: 1px solid var(--line) !important;
-  background: var(--surface) !important;
-  color: var(--ink) !important;
+  background: #fff !important;
   padding: .6rem .85rem !important;
 }
 [data-testid="stTextInput"] input:focus {
@@ -177,6 +158,7 @@ input::placeholder { color: var(--muted) !important; opacity: 1 !important; }
 }
 [data-testid="stForm"] { box-shadow: none !important; }
 
+/* Buttons: pill, accent fill. */
 .stButton > button, [data-testid="stFormSubmitButton"] > button {
   border-radius: 999px !important;
   border: 1px solid var(--line) !important;
@@ -191,21 +173,26 @@ input::placeholder { color: var(--muted) !important; opacity: 1 !important; }
 }
 [data-testid="stFormSubmitButton"] > button:hover { filter: brightness(.96); }
 
+/* Cards and the results table share one hairline language. */
 [data-testid="stForm"],
 [data-testid="stExpander"] details,
 [data-testid="stDataFrame"] {
   border: 1px solid var(--line) !important;
   border-radius: 14px !important;
-  background: var(--surface);
+  background: #fff;
 }
 [data-testid="stForm"] { padding: 1.35rem 1.5rem 1.15rem !important; }
 [data-testid="stExpander"] details { background: var(--panel); }
 [data-testid="stExpander"] summary { font-size: .88rem; font-weight: 600; }
 
+/* Alerts: flat tints rather than saturated blocks. */
 [data-testid="stAlert"] { border-radius: 12px; border: 1px solid var(--line); }
 
-/* Role chips: the container clips its contents once every role is selected,
-   and a solid accent fill leaves the text short of comfortable contrast. */
+/* Role chips. Two defects to correct, both addressed structurally because the
+   emotion class hashes change between Streamlit releases:
+   the chip container clips its own contents once every role is selected, and
+   the chips take the accent as a solid fill, which leaves their text short of
+   a comfortable contrast ratio. A soft tint carries the same colour cue. */
 [data-testid="stMultiSelect"] * { max-height: none !important; }
 [data-testid="stMultiSelect"] span { color: var(--ink) !important; }
 [data-testid="stMultiSelect"] span[class*="st-emotion"] {
@@ -219,63 +206,11 @@ input::placeholder { color: var(--muted) !important; opacity: 1 !important; }
 
 .build-stamp { color: var(--muted); font-size: .74rem; margin-top: .5rem; }
 </style>
-""" % t
+"""
 
 
 def _inject_theme() -> None:
-    """Apply the stylesheet matching the viewer's System/Light/Dark choice."""
-    try:
-        dark = str(getattr(st.context.theme, "type", "light")).lower() == "dark"
-    except Exception:
-        dark = False
-    st.markdown(_theme_css(dark), unsafe_allow_html=True)
-
-
-def _hide_host_chrome() -> None:
-    """Hide Streamlit Cloud's injected "Manage app" control.
-
-    It is added to the page by the host after the app renders and carries no
-    stable id, so a stylesheet alone cannot reliably reach it. This runs in a
-    zero-height component frame and hides the control in the parent document,
-    re-checking when the host re-adds it. Everything is wrapped defensively:
-    the control does not exist off Streamlit Cloud, and failing to find it
-    must never disturb the page.
-    """
-    st.components.v1.html(
-        """
-<script>
-(function () {
-  var doc;
-  try { doc = window.parent.document; } catch (e) { return; }
-  if (!doc) return;
-
-  function hide() {
-    var nodes = doc.querySelectorAll('button, a, div, span');
-    for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i];
-      if (el.childElementCount > 3) continue;
-      if ((el.textContent || '').trim() !== 'Manage app') continue;
-      var n = el;
-      for (var d = 0; d < 4 && n && n !== doc.body; d++) {
-        var pos = window.parent.getComputedStyle(n).position;
-        if (pos === 'fixed' || pos === 'absolute') break;
-        n = n.parentElement;
-      }
-      (n || el).style.setProperty('display', 'none', 'important');
-    }
-  }
-
-  hide();
-  var pending = null;
-  new MutationObserver(function () {
-    if (pending) return;                       // debounce: the host mutates often
-    pending = setTimeout(function () { pending = null; hide(); }, 300);
-  }).observe(doc.body, { childList: true, subtree: true });
-})();
-</script>
-""",
-        height=0,
-    )
+    st.markdown(THEME, unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -528,7 +463,6 @@ def _render_sidebar() -> dict:
 # --------------------------------------------------------------------------- #
 def main() -> None:
     _inject_theme()
-    _hide_host_chrome()
     options = _render_sidebar()
 
     st.markdown(
