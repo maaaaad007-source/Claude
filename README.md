@@ -40,9 +40,13 @@ Press **Extract Real Executive Contacts** to render the output matrix:
 `Verified` and `Found` are addresses Hunter actually observed; `Guess` rows are
 derived from a naming pattern and are not confirmed to exist.
 
-Sidebar settings tune the run: which role categories to search, how many results
-to keep per category, how strictly to enforce the country, the email lookup key,
-and a stricter filter that drops results which never name the company.
+Sidebar settings tune the run: which role categories to search, how strictly to
+enforce the country, the email lookup key, and a stricter filter that drops
+results which never name the company. Each role is always swept to full depth.
+
+The table shows Full Name, Title, Email, Country and LinkedIn Profile. The CSV
+export additionally carries **Email Source** and **Category**, so the provenance
+of every address is preserved in the file even though it is off screen.
 
 Results are cached for one hour per input combination, and the full matrix can
 be exported with **Download CSV**.

@@ -24,6 +24,16 @@ from executive_finder.emails import DEFAULT_PATTERN
 from executive_finder.pipeline import find_contacts_detailed, split_company_input
 from executive_finder.search import api_key, configure_api_keys
 
+# The role sweep always runs at full depth; there is no reason to make the
+# user choose a smaller number, and a partial sweep only hides contacts.
+MAX_PER_CATEGORY = 25
+
+# The table shows these; the CSV keeps every column, so the provenance of each
+# address (verified vs guessed) survives the export even though it is not on
+# screen.
+DISPLAY_COLUMNS = ["Full Name", "Designation", "Email", "Country",
+                   "LinkedIn Profile"]
+
 st.set_page_config(
     page_title="Contact Finder",
     page_icon="◆",
@@ -38,12 +48,14 @@ st.set_page_config(
 THEME = """
 <style>
 :root {
-  --accent:  #F5C518;
-  --accent-ink: #1F2430;
-  --ink:     #1F2430;
-  --muted:   #8A90A0;
-  --line:    #ECEEF2;
-  --panel:   #FAFBFC;
+  --accent:     #6B9080;
+  --accent-soft:#EDF2F0;
+  --on-accent:  #FFFFFF;
+  --ink:        #1F2430;
+  --muted:      #8A90A0;
+  --line:       #ECEEF2;
+  --input-line: #D6DBE1;
+  --panel:      #FAFBFC;
 }
 
 /* Streamlit's own chrome competes with the page's own header. */
@@ -74,10 +86,6 @@ html, body, [class*="css"] { color: var(--ink); }
   font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em;
   margin: 0 0 1.6rem 0;
 }
-.wordmark span.mark {
-  width: 26px; height: 26px; border-radius: 8px;
-  background: var(--accent); display: inline-block;
-}
 
 /* Section heading above the results table. */
 .section-title {
@@ -90,16 +98,16 @@ html, body, [class*="css"] { color: var(--ink); }
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {
   border-radius: 10px !important;
-  border: 1px solid var(--line) !important;
+  border: 1px solid var(--input-line) !important;
   background: #fff !important;
   padding: .6rem .85rem !important;
 }
 [data-testid="stTextInput"] input:focus {
   border-color: var(--accent) !important;
-  box-shadow: 0 0 0 3px rgba(245,197,24,.18) !important;
+  box-shadow: 0 0 0 3px rgba(107,144,128,.18) !important;
 }
 
-/* Buttons: pill, amber, dark ink. */
+/* Buttons: pill, accent fill. */
 .stButton > button, [data-testid="stFormSubmitButton"] > button {
   border-radius: 999px !important;
   border: 1px solid var(--line) !important;
@@ -110,7 +118,7 @@ html, body, [class*="css"] { color: var(--ink); }
 [data-testid="stFormSubmitButton"] > button {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
-  color: var(--accent-ink) !important;
+  color: var(--on-accent) !important;
 }
 [data-testid="stFormSubmitButton"] > button:hover { filter: brightness(.96); }
 
@@ -132,10 +140,13 @@ html, body, [class*="css"] { color: var(--ink); }
 /* Role chips. Two defects to correct, both addressed structurally because the
    emotion class hashes change between Streamlit releases:
    the chip container clips its own contents once every role is selected, and
-   the chips inherit the accent as a fill with white text, which fails
-   contrast against a light accent. */
+   the chips take the accent as a solid fill, which leaves their text short of
+   a comfortable contrast ratio. A soft tint carries the same colour cue. */
 [data-testid="stMultiSelect"] * { max-height: none !important; }
 [data-testid="stMultiSelect"] span { color: var(--ink) !important; }
+[data-testid="stMultiSelect"] span[class*="st-emotion"] {
+  background-color: var(--accent-soft) !important;
+}
 
 .empty-state {
   color: var(--muted); font-size: .88rem;
@@ -304,14 +315,13 @@ def _render_sidebar() -> dict:
     """
     with st.sidebar:
         st.markdown(
-            '<div class="wordmark"><span class="mark"></span>contactfinder</div>',
+            '<div class="wordmark">contactfinder</div>',
             unsafe_allow_html=True,
         )
 
         categories = st.multiselect(
             "Roles", CATEGORIES, default=CATEGORIES, label_visibility="visible"
         )
-        max_per_category = st.slider("Results per role", 1, 25, 10)
         country_filter = st.radio(
             "Country match",
             options=["strict", "relaxed", "off"],
@@ -386,7 +396,6 @@ def _render_sidebar() -> dict:
 
     return {
         "categories": categories,
-        "max_per_category": max_per_category,
         "country_filter": country_filter,
         "hunter_key": hunter_key,
         "discover_patterns": discover_patterns,
@@ -405,9 +414,9 @@ def main() -> None:
 
     with st.form("search_panel"):
         left, middle, right = st.columns(3)
-        company = left.text_input("Company", placeholder="Volvo Cars")
-        domain = middle.text_input("Domain", placeholder="volvocars.com")
-        country = right.text_input("Country", placeholder="Sweden")
+        company = left.text_input("Company", placeholder="i.e. Spotify, Volvo…")
+        domain = middle.text_input("Domain", placeholder="i.e. spotify.com")
+        country = right.text_input("Country", placeholder="i.e. Sweden, United Kingdom…")
         submitted = st.form_submit_button("Find contacts", type="primary")
 
     if not submitted:
@@ -446,7 +455,7 @@ def main() -> None:
             country.strip(),
             tuple(options["categories"]),
             options["email_pattern"],
-            options["max_per_category"],
+            MAX_PER_CATEGORY,
             options["require_company"],
             bool(api_key("serper") or api_key("brave")),
             options["country_filter"],
@@ -500,19 +509,19 @@ def main() -> None:
     )
 
     st.dataframe(
-        frame,
+        frame[DISPLAY_COLUMNS],
         use_container_width=True,
         hide_index=True,
         column_config={
             "LinkedIn Profile": st.column_config.LinkColumn(
-                "Profile", display_text="Open"
+                "LinkedIn Profile", display_text="Open"
             ),
             "Designation": st.column_config.TextColumn("Title", width="large"),
-            "Email Source": st.column_config.TextColumn(
-                "Source",
+            "Email": st.column_config.TextColumn(
+                "Email",
                 width="medium",
-                help="Verified/Found = observed. Guess = derived from a naming "
-                     "pattern and not confirmed to exist.",
+                help="Addresses are predicted unless the summary above counts "
+                     "them as verified. The CSV records the source of each one.",
             ),
         },
     )
