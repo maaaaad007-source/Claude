@@ -103,3 +103,31 @@ def classify(designation: str) -> Optional[str]:
 def matches_any_role(designation: str) -> bool:
     """True when the designation contains at least one targeted role keyword."""
     return classify(designation) is not None
+
+
+def keywords_for(category: str) -> List[str]:
+    """Search keywords for a category.
+
+    Built-in categories expand to their whole keyword set; anything else is a
+    role the user typed themselves and stands as its own single keyword.
+    """
+    if category in ROLE_MATRIX:
+        return ROLE_MATRIX[category]
+    category = (category or "").strip()
+    return [category] if category else []
+
+
+def is_custom(category: str) -> bool:
+    """True when the category is a user-supplied role, not a built-in one."""
+    return bool(category) and category not in ROLE_MATRIX
+
+
+def mentions_role(role: str, text: str) -> bool:
+    """True when a free-text role appears in the text.
+
+    Used to keep results for a role the matrix knows nothing about, where
+    ``classify`` can offer no opinion at all.
+    """
+    if not role or not text:
+        return False
+    return bool(_keyword_pattern(role).search(text))

@@ -201,11 +201,16 @@ def _to_contact(
 
     category = roles.classify(parsed.designation) or roles.classify(result.snippet)
     if category is None:
-        # The header carried no recognisable role keyword; only trust the
-        # query's own category when the snippet at least names the company.
-        if not _mentions_company(result.snippet + " " + result.title, company_tokens):
+        # The matrix has no opinion. For a role the user typed, the role text
+        # appearing in the result is itself the evidence; otherwise fall back
+        # to trusting the query only when the company is named.
+        blob = " ".join((parsed.designation, result.title, result.snippet))
+        if roles.mentions_role(fallback_category, blob):
+            category = fallback_category
+        elif _mentions_company(result.snippet + " " + result.title, company_tokens):
+            category = fallback_category
+        else:
             return None, "off_target"
-        category = fallback_category
 
     if require_company and not _mentions_company(
         " ".join((result.title, result.snippet)), company_tokens
@@ -389,9 +394,13 @@ def find_contacts_detailed(
     if not company:
         raise ValueError("Company name is required.")
 
-    selected = [c for c in (categories or roles.CATEGORIES) if c in roles.ROLE_MATRIX]
+    # Any role the user typed is searched as itself; the matrix is a set of
+    # convenient defaults, not the limit of what can be looked for.
+    selected = [
+        str(c).strip() for c in (categories or roles.CATEGORIES) if str(c).strip()
+    ]
     if not selected:
-        raise ValueError("Select at least one role category.")
+        raise ValueError("Select at least one role.")
 
     mail_domain = normalise_domain(domain, company)
     tokens = _company_tokens(company)
@@ -411,7 +420,7 @@ def find_contacts_detailed(
         if progress:
             progress("Searching {}\u2026".format(category), index / len(selected))
 
-        query = build_query(company, roles.ROLE_MATRIX[category], country)
+        query = build_query(company, roles.keywords_for(category), country)
         report.queries.append(query)
         try:
             results, outcomes = search_detailed(

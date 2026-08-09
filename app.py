@@ -366,7 +366,14 @@ def _render_sidebar() -> dict:
     """
     with st.sidebar:
         categories = st.multiselect(
-            "Roles", CATEGORIES, default=CATEGORIES, label_visibility="visible"
+            "Roles",
+            CATEGORIES,
+            default=CATEGORIES,
+            accept_new_options=True,
+            placeholder="Pick or type a role…",
+            help="Not limited to these five — type any role and press Enter, "
+                 "e.g. CTO, Head of Marketing, Country Manager. Each role is "
+                 "searched as its own query.",
         )
         country_filter = st.radio(
             "Country match",

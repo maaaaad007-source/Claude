@@ -51,9 +51,20 @@ of every address is preserved in the file even though it is off screen.
 Results are cached for one hour per input combination, and the full matrix can
 be exported with **Download CSV**.
 
-## Targeted role matrix
+## Roles
 
-Five decision-maker categories, each searched with its own expanded keyword set
+The **Roles** control is not a fixed list — type any role and press Enter
+(`CTO`, `Head of Marketing`, `Country Manager`) and it is searched as its own
+query alongside the built-in categories.
+
+A typed role is searched literally, whereas a built-in category expands to its
+whole keyword set, so `CEO / Executive` covers five phrasings in one query. For
+a typed role the result is kept when the role text appears in the profile, or
+failing that when the company is named — so `Head of Marketing` will not drag
+in unrelated profiles. A recognisable title is still classified by the matrix
+rather than by the query that found it.
+
+Five built-in categories, each with its own expanded keyword set
 (`executive_finder/roles.py`):
 
 | Category | Keywords |
@@ -123,7 +134,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-156 tests cover query construction, redirect unwrapping (including Bing's
+174 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
