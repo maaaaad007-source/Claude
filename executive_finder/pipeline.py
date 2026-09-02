@@ -93,6 +93,7 @@ class SearchReport:
     dropped_not_profile: int = 0
     dropped_unparsed_title: int = 0
     dropped_off_target: int = 0
+    dropped_wrong_person: int = 0
     dropped_wrong_country: int = 0
     dropped_duplicate: int = 0
     kept: int = 0
@@ -117,12 +118,14 @@ class SearchReport:
     def summary(self) -> str:
         return (
             "{raw} raw results — dropped {np} non-profile, {ut} unparseable, "
-            "{ot} off-target, {wc} wrong-country, {dup} duplicate; "
+            "{ot} off-target, {wp} wrong-person, {wc} wrong-country, "
+            "{dup} duplicate; "
             "kept {kept} ({obs} observed emails, {gs} guessed)".format(
                 raw=self.raw_results,
                 np=self.dropped_not_profile,
                 ut=self.dropped_unparsed_title,
                 ot=self.dropped_off_target,
+                wp=self.dropped_wrong_person,
                 wc=self.dropped_wrong_country,
                 dup=self.dropped_duplicate,
                 kept=self.kept,
@@ -170,6 +173,19 @@ def _mentions_company(text: str, tokens: Sequence[str]) -> bool:
     return any(token in lowered for token in tokens)
 
 
+def matches_person(wanted: str, found: str) -> bool:
+    """True when a result's name is the person who was searched for.
+
+    Compared on sanitised tokens, so case, accents and punctuation do not
+    matter.  Every token the user typed must be present, which lets "Daniel
+    Ek" match "Daniel P. Ek" without letting "Daniel Ek" match "Daniel Berg".
+    """
+    asked = set(sanitize_name(wanted))
+    if not asked:
+        return False
+    return asked.issubset(set(sanitize_name(found)))
+
+
 def _dedupe_key(contact_url: str, full_name: str) -> str:
     if contact_url:
         return canonical_linkedin_url(contact_url).lower()
@@ -186,6 +202,7 @@ def _to_contact(
     company_tokens: Sequence[str],
     require_company: bool,
     country_mode: str = "off",
+    person: str = "",
 ) -> tuple:
     """Turn one raw result node into ``(contact, reason)``.
 
@@ -198,6 +215,18 @@ def _to_contact(
     parsed = parse_title(result.title, company)
     if parsed is None:
         return None, "unparsed_title"
+
+    if person:
+        # Searching for someone by name: the name is the whole test. A role
+        # keyword would be the wrong gate — the point is to find this person
+        # whatever their title turns out to be.
+        if not matches_person(person, parsed.full_name):
+            return None, "wrong_person"
+        category = (roles.classify(parsed.designation)
+                    or roles.classify(result.snippet)
+                    or "Named search")
+        return _finish(parsed, result, country, domain, pattern, category,
+                       country_mode)
 
     category = roles.classify(parsed.designation) or roles.classify(result.snippet)
     if category is None:
@@ -217,8 +246,17 @@ def _to_contact(
     ):
         return None, "off_target"
 
-    # The country check reads the locale subdomain off the raw URL, so it must
-    # run before canonical_linkedin_url() rewrites every host to www.
+    return _finish(parsed, result, country, domain, pattern, category,
+                   country_mode)
+
+
+def _finish(parsed, result, country, domain, pattern, category, country_mode):
+    """Apply the country filter and build the row.
+
+    Shared by both paths so a named search is filtered by country exactly as a
+    role sweep is — the country check reads the locale subdomain off the raw
+    URL, so it must run before canonical_linkedin_url() rewrites the host.
+    """
     if country_mode != "off":
         verdict = country_match(
             country,
@@ -231,7 +269,7 @@ def _to_contact(
 
     contact = Contact(
         full_name=parsed.full_name,
-        designation=parsed.designation or fallback_category,
+        designation=parsed.designation or category,
         estimated_email=build_email(parsed.full_name, domain, pattern) or "",
         country=country.strip(),
         category=category,
@@ -372,6 +410,7 @@ def find_contacts_detailed(
     domain: str = "",
     country: str = "",
     categories: Optional[Iterable[str]] = None,
+    person: str = "",
     email_pattern: str = DEFAULT_PATTERN,
     max_per_category: int = 10,
     require_company: bool = False,
@@ -394,13 +433,19 @@ def find_contacts_detailed(
     if not company:
         raise ValueError("Company name is required.")
 
-    # Any role the user typed is searched as itself; the matrix is a set of
-    # convenient defaults, not the limit of what can be looked for.
-    selected = [
-        str(c).strip() for c in (categories or roles.CATEGORIES) if str(c).strip()
-    ]
-    if not selected:
-        raise ValueError("Select at least one role.")
+    # A named search replaces the role sweep rather than adding to it: the
+    # person is the target, and their title is whatever it turns out to be.
+    person = (person or "").strip()
+    if person:
+        selected = [person]
+    else:
+        # Any role the user typed is searched as itself; the matrix is a set
+        # of convenient defaults, not the limit of what can be looked for.
+        selected = [
+            str(c).strip() for c in (categories or roles.CATEGORIES) if str(c).strip()
+        ]
+        if not selected:
+            raise ValueError("Select at least one role.")
 
     mail_domain = normalise_domain(domain, company)
     tokens = _company_tokens(company)
@@ -418,9 +463,12 @@ def find_contacts_detailed(
 
     for index, category in enumerate(selected):
         if progress:
-            progress("Searching {}\u2026".format(category), index / len(selected))
+            label = ("Searching for {}\u2026".format(person) if person
+                     else "Searching {}\u2026".format(category))
+            progress(label, index / len(selected))
 
-        query = build_query(company, roles.keywords_for(category), country)
+        keywords = [person] if person else roles.keywords_for(category)
+        query = build_query(company, keywords, country)
         report.queries.append(query)
         try:
             results, outcomes = search_detailed(
@@ -438,7 +486,7 @@ def find_contacts_detailed(
                 break
             contact, reason = _to_contact(
                 result, company, country, mail_domain, email_pattern,
-                category, tokens, require_company, country_mode,
+                category, tokens, require_company, country_mode, person,
             )
             if contact is None:
                 setattr(report, "dropped_" + reason,

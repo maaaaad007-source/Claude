@@ -284,6 +284,7 @@ def _cached_search(
     domain: str,
     country: str,
     categories: tuple,
+    person: str,
     email_pattern: str,
     max_per_category: int,
     require_company: bool,
@@ -306,6 +307,7 @@ def _cached_search(
         domain=domain,
         country=country,
         categories=list(categories),
+        person=person,
         email_pattern=email_pattern,
         max_per_category=max_per_category,
         require_company=require_company,
@@ -492,9 +494,15 @@ def main() -> None:
     )
 
     with st.form("search_panel"):
-        left, middle, right = st.columns(3)
+        left, second, third, right = st.columns(4)
         company = left.text_input("Company", placeholder="i.e. Spotify, Volvo…")
-        domain = middle.text_input("Domain", placeholder="i.e. spotify.com")
+        person = second.text_input(
+            "Person",
+            placeholder="i.e. Daniel Ek",
+            help="Optional. Naming someone searches for that person instead of "
+                 "sweeping the roles — their title is whatever it turns out to be.",
+        )
+        domain = third.text_input("Domain", placeholder="i.e. spotify.com")
         # Suggestions are exactly the countries geo.py can verify — offering
         # one it cannot check would disengage the country filter without
         # saying so. Typed values are still accepted for anything else.
@@ -522,9 +530,15 @@ def main() -> None:
         st.error("Company is required.")
         return
 
-    if not options["categories"]:
-        st.error("Select at least one role in the sidebar.")
+    if not person.strip() and not options["categories"]:
+        st.error("Select at least one role in the sidebar, or name a person.")
         return
+
+    if person.strip():
+        st.caption(
+            "Searching for **{}** at {} — role categories are not used for a "
+            "named search.".format(person.strip(), company.strip())
+        )
 
     # A domain typed into the company field poisons every query, so recover it.
     resolved_company, resolved_input_domain = split_company_input(company, domain)
@@ -546,6 +560,7 @@ def main() -> None:
             domain.strip(),
             country.strip(),
             tuple(options["categories"]),
+            person.strip(),
             options["email_pattern"],
             MAX_PER_CATEGORY,
             options["require_company"],
