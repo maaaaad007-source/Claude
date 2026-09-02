@@ -7,13 +7,13 @@ here.
 
 - **Last verified:** 2026-09-02
 - **Test suite:** passing — 174 passed
-- **Python:** 3.11.15
+- **Python:** 3.12.14
 
 | Dependency | Version resolved |
 | :--- | :--- |
-| streamlit | 1.61.1 |
+| streamlit | 1.63.0 |
 | pandas | 3.0.5 |
-| requests | 2.33.1 |
+| requests | 2.34.2 |
 | beautifulsoup4 | 4.15.0 |
-| lxml | 6.1.1 |
+| lxml | 6.1.3 |
 | pytest | 9.1.1 |
