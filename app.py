@@ -194,6 +194,10 @@ html, body, [class*="css"] { color: var(--ink); }
 [data-testid="stExpander"] details { background: var(--panel); }
 [data-testid="stExpander"] summary { font-size: .88rem; font-weight: 600; }
 
+/* Streamlit prints "Press Enter to submit form" / "Press Enter to apply"
+   under every focused field. One container carries all of them. */
+[data-testid="InputInstructions"] { display: none !important; }
+
 /* Alerts: flat tints rather than saturated blocks. */
 [data-testid="stAlert"] { border-radius: 12px; border: 1px solid var(--line); }
 
