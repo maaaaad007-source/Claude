@@ -1,0 +1,65 @@
+name: Weekly check
+
+# Runs the suite weekly and commits the resulting STATUS.md.
+#
+# The commit is the point as well as the report: GitHub disables scheduled
+# workflows after 60 days of *repository* inactivity, and a workflow's own runs
+# do not count as activity. Without a commit, this schedule would quietly stop
+# after two months. Writing a real status file keeps it alive and leaves
+# something worth reading behind.
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays, 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-check
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run the suite and write STATUS.md
+        run: python scripts/status_report.py
+
+      - name: Commit the report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add STATUS.md
+          # Only the date changes on a quiet week, which is still enough to
+          # keep the schedule from being disabled.
+          if git diff --cached --quiet; then
+            echo "STATUS.md unchanged; nothing to commit."
+            exit 0
+          fi
+          git commit -m "Weekly check: $(date -u +%Y-%m-%d) [skip ci]"
+          # The branch may have moved since checkout; rebase rather than fail.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "Could not push the weekly report after 3 attempts." >&2
+          exit 1

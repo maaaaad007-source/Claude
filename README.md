@@ -1,5 +1,7 @@
 # 🎯 Executive Contact Finder
 
+[![CI](https://github.com/maaaaad007-source/Claude/actions/workflows/ci.yml/badge.svg)](https://github.com/maaaaad007-source/Claude/actions/workflows/ci.yml)
+
 A Streamlit application for recruitment leads, executive talent scouts and sales
 professionals. Given a target company and region it discovers executive names,
 exact job titles, predicted corporate email addresses and direct LinkedIn
@@ -139,6 +141,22 @@ base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
 network stubbed).
+
+## Automation
+
+| Workflow | When | What it does |
+| :--- | :--- | :--- |
+| `ci.yml` | every push and PR | runs the suite on Python 3.11 and 3.12, installs the real `requirements.txt`, compiles `app.py` |
+| `weekly.yml` | Mondays 04:17 UTC | runs the suite and commits `STATUS.md` |
+
+The weekly job commits deliberately. GitHub disables scheduled workflows after
+60 days of **repository** inactivity, and a workflow's own runs do not count as
+activity — so a schedule that only ran tests would go quiet after two months.
+Writing a dated status report keeps the schedule alive and leaves a record of
+what was verified against which dependency versions.
+
+To stop it: disable **Weekly check** under the repository's Actions tab, or
+delete `.github/workflows/weekly.yml`.
 
 ## Deployment — Streamlit Community Cloud
 
