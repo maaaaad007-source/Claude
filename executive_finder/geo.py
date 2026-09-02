@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Dict, FrozenSet, NamedTuple, Sequence, Set
+from typing import Dict, FrozenSet, List, NamedTuple, Sequence, Set
 from urllib.parse import urlparse
 
-__all__ = ["CountryVerdict", "locale_of", "country_match", "known_country"]
+__all__ = [
+    "SUPPORTED_COUNTRIES",
+    "CountryVerdict",
+    "country_match",
+    "known_country",
+    "locale_of",
+]
 
 
 class CountryVerdict(NamedTuple):
@@ -150,6 +156,11 @@ _CITIES: Dict[str, FrozenSet[str]] = {
 }
 
 _PROFILE_HOST = re.compile(r"^([a-z0-9\-]+)\.linkedin\.com$", re.IGNORECASE)
+
+# Countries this module can positively verify, in display case, for the UI to
+# suggest. Deliberately the same set the filter understands: offering a country
+# it cannot check would silently disengage the filter for that search.
+SUPPORTED_COUNTRIES: List[str] = sorted(name.title() for name in _LOCALES)
 
 
 def _fold(value: str) -> str:

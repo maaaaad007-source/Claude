@@ -21,6 +21,7 @@ from executive_finder import (
     normalise_domain,
 )
 from executive_finder.emails import DEFAULT_PATTERN
+from executive_finder.geo import SUPPORTED_COUNTRIES
 from executive_finder.pipeline import find_contacts_detailed, split_company_input
 from executive_finder.search import api_key, configure_api_keys
 
@@ -141,18 +142,26 @@ html, body, [class*="css"] { color: var(--ink); }
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input,
 [data-testid="stTextInput"] > div,
-[data-testid="stTextInput"] div[class*="react-aria"] {
+[data-testid="stTextInput"] div[class*="react-aria"],
+[data-testid="stSelectbox"] div[class*="react-aria"],
+[data-testid="stSelectbox"] input {
   box-shadow: none !important;
   outline: none !important;
 }
+/* The Country field is a combobox, not a text input; it needs the same
+   treatment or it reads as a different kind of control beside the other two. */
 [data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input {
+[data-testid="stNumberInput"] input,
+[data-testid="stSelectbox"] div[data-testid="stSelectboxVirtualDropdown"],
+[data-testid="stSelectbox"] > div > div {
   border-radius: 10px !important;
   border: 1px solid var(--line) !important;
   background: #fff !important;
-  padding: .6rem .85rem !important;
 }
-[data-testid="stTextInput"] input:focus {
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input { padding: .6rem .85rem !important; }
+[data-testid="stTextInput"] input:focus,
+[data-testid="stSelectbox"] div[class*="react-aria"]:focus-within {
   border-color: var(--accent) !important;
   box-shadow: none !important;
 }
@@ -475,7 +484,20 @@ def main() -> None:
         left, middle, right = st.columns(3)
         company = left.text_input("Company", placeholder="i.e. Spotify, Volvo…")
         domain = middle.text_input("Domain", placeholder="i.e. spotify.com")
-        country = right.text_input("Country", placeholder="i.e. Sweden, United Kingdom…")
+        # Suggestions are exactly the countries geo.py can verify — offering
+        # one it cannot check would disengage the country filter without
+        # saying so. Typed values are still accepted for anything else.
+        country = right.selectbox(
+            "Country",
+            options=SUPPORTED_COUNTRIES,
+            index=None,
+            placeholder="i.e. Sweden, United Kingdom…",
+            accept_new_options=True,
+            help="Optional. Pick from the list for the strongest filtering, or "
+                 "type any country — the filter stands down for one it cannot "
+                 "verify rather than dropping every result.",
+        )
+        country = country or ""
         submitted = st.form_submit_button("Find contacts", type="primary")
 
     if not submitted:

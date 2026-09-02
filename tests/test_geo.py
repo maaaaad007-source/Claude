@@ -174,3 +174,57 @@ def test_no_country_means_no_filtering(monkeypatch):
         "Volvo", categories=["CEO / Executive"], country_filter="strict", pause=0,
     )
     assert len(contacts) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Country suggestions offered by the UI
+# --------------------------------------------------------------------------- #
+def test_every_suggestion_is_one_the_filter_can_verify():
+    """The list exists so a picked country always gets real filtering."""
+    from executive_finder.geo import SUPPORTED_COUNTRIES
+
+    assert SUPPORTED_COUNTRIES
+    unverifiable = [c for c in SUPPORTED_COUNTRIES if not known_country(c)]
+    assert unverifiable == []
+
+
+def test_suggestions_are_sorted_and_display_cased():
+    from executive_finder.geo import SUPPORTED_COUNTRIES
+
+    assert SUPPORTED_COUNTRIES == sorted(SUPPORTED_COUNTRIES)
+    assert "United Kingdom" in SUPPORTED_COUNTRIES
+    assert "United Arab Emirates" in SUPPORTED_COUNTRIES
+    assert "New Zealand" in SUPPORTED_COUNTRIES
+    # No lowercase keys leaking through from the internal table.
+    assert all(c == c.title() for c in SUPPORTED_COUNTRIES)
+
+
+def test_suggestions_have_no_duplicates():
+    from executive_finder.geo import SUPPORTED_COUNTRIES
+
+    assert len(SUPPORTED_COUNTRIES) == len(set(SUPPORTED_COUNTRIES))
+
+
+def test_a_picked_suggestion_filters_end_to_end(monkeypatch):
+    """Picking a suggestion must actually engage the filter, not just look tidy."""
+    from executive_finder.geo import SUPPORTED_COUNTRIES
+
+    _stub(monkeypatch, [SWEDISH, GERMAN])
+    for picked in ("Sweden", "United Kingdom", "United States"):
+        assert picked in SUPPORTED_COUNTRIES
+
+    contacts, report = pipeline.find_contacts_detailed(
+        "Volvo", domain="volvocars.com", country="Sweden",
+        categories=["CEO / Executive"], country_filter="strict", pause=0,
+    )
+    assert [c.full_name for c in contacts] == ["Jim Rowan"]
+    assert report.dropped_wrong_country == 1
+
+
+def test_a_typed_country_outside_the_list_still_runs(monkeypatch):
+    _stub(monkeypatch, [SWEDISH, GERMAN])
+    contacts, _ = pipeline.find_contacts_detailed(
+        "Volvo", country="Atlantis", categories=["CEO / Executive"],
+        country_filter="strict", pause=0,
+    )
+    assert len(contacts) == 2

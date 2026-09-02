@@ -24,7 +24,7 @@ The top control panel takes three inputs:
 | :--- | :--- | :--- |
 | **Company Name** | Yes | The target organisation — `Volvo`, `Spotify`, `IKEA` |
 | **Company Domain** | No | `volvocars.com`. Defaults to `companyname.com` when blank |
-| **Country** | No | `Sweden`, `United Kingdom`, `United States` |
+| **Country** | No | Suggests the 51 countries the filter can verify; typing anything else is still accepted |
 
 Press **Extract Real Executive Contacts** to render the output matrix:
 
@@ -136,7 +136,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-174 tests cover query construction, redirect unwrapping (including Bing's
+179 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
