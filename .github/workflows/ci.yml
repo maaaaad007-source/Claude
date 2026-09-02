@@ -1,0 +1,50 @@
+name: CI
+
+# Runs on every push and pull request, plus weekly. The weekly run is the
+# useful part for a project like this: the pipeline depends on third-party
+# search and enrichment APIs, and on Streamlit's own DOM, so a scheduled run
+# catches a dependency release breaking the suite even when nobody is working
+# on the repo.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays, 04:17 UTC
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        # Installing the real requirements, not just the test deps, so a
+        # broken or unresolvable requirements.txt fails here rather than on
+        # the next deploy.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tests -q
+
+      - name: Check the app module imports
+        # The suite never imports app.py, since it needs a Streamlit runtime.
+        # Compiling it catches syntax errors that tests would sail past.
+        run: python -m compileall -q app.py executive_finder
