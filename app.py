@@ -293,12 +293,15 @@ def _cached_search(
     hunter_key: str,
     use_email_finder: bool,
     discover_patterns: bool,
-    _progress=None,
 ):
     """Run the pipeline behind a one-hour cache keyed on the search inputs.
 
-    ``_progress`` is underscore-prefixed so Streamlit leaves it out of the
-    cache key — the callback differs on every rerun but the results do not.
+    Nothing in here may draw to the page. Streamlit records the element calls a
+    cached function makes so it can replay them on a hit, and a progress
+    callback closing over a status line and a progress bar cannot be replayed —
+    it raises CacheReplayClosureError instead of returning the cached rows. The
+    spinner therefore lives at the call site, outside the cache.
+
     ``has_api_key`` is part of the key so that adding a key invalidates a
     cached blocked run instead of replaying it.
     """
@@ -315,7 +318,6 @@ def _cached_search(
         hunter_key=hunter_key,
         use_email_finder=use_email_finder,
         discover_patterns=discover_patterns,
-        progress=_progress,
     )
     return contacts_to_records(contacts), report
 
@@ -547,30 +549,25 @@ def main() -> None:
             resolved_company
         ))
 
-    status = st.empty()
-    bar = st.progress(0.0)
-
-    def progress(message: str, fraction: float) -> None:
-        status.caption(message)
-        bar.progress(min(max(fraction, 0.0), 1.0))
-
+    # The spinner is deliberately outside the cached call: elements drawn
+    # inside a cached function cannot be replayed on a cache hit.
     try:
-        records, report = _cached_search(
-            company.strip(),
-            domain.strip(),
-            country.strip(),
-            tuple(options["categories"]),
-            person.strip(),
-            options["email_pattern"],
-            MAX_PER_CATEGORY,
-            options["require_company"],
-            bool(api_key("serper") or api_key("brave")),
-            options["country_filter"],
-            options["hunter_key"],
-            options["use_email_finder"],
-            options["discover_patterns"],
-            _progress=progress,
-        )
+        with st.spinner("Searching\u2026"):
+            records, report = _cached_search(
+                company.strip(),
+                domain.strip(),
+                country.strip(),
+                tuple(options["categories"]),
+                person.strip(),
+                options["email_pattern"],
+                MAX_PER_CATEGORY,
+                options["require_company"],
+                bool(api_key("serper") or api_key("brave")),
+                options["country_filter"],
+                options["hunter_key"],
+                options["use_email_finder"],
+                options["discover_patterns"],
+            )
     except SearchError as exc:
         st.error("Blocked by the search providers — none returned results.")
         _render_api_key_help()
@@ -580,9 +577,6 @@ def main() -> None:
     except ValueError as exc:
         st.error(str(exc))
         return
-    finally:
-        bar.empty()
-        status.empty()
 
     if not records:
         if report.blocked:
