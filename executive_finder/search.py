@@ -141,15 +141,24 @@ def _decode_bing_target(value: str) -> str:
     """
     if not value:
         return ""
-    payload = value[2:] if value[:2] in ("a1", "a2") else value
-    try:
-        # base64url, stripped of padding by Bing — restore it before decoding.
-        decoded = base64.urlsafe_b64decode(
-            payload + "=" * (-len(payload) % 4)
-        ).decode("utf-8", "replace")
-    except Exception:
-        return ""
-    return decoded if decoded.startswith(("http://", "https://")) else ""
+
+    # Bing prefixes the payload with a short marker ("a1", "a2", …). Rather
+    # than enumerate the ones seen so far — a new marker would silently turn
+    # every result into a non-profile drop — try the value as-is and with a
+    # two-character prefix removed, and accept whichever decodes to a URL.
+    for payload in (value[2:], value):
+        if not payload:
+            continue
+        try:
+            # base64url, stripped of padding by Bing — restore it to decode.
+            decoded = base64.urlsafe_b64decode(
+                payload + "=" * (-len(payload) % 4)
+            ).decode("utf-8", "replace")
+        except Exception:
+            continue
+        if decoded.startswith(("http://", "https://")):
+            return decoded
+    return ""
 
 
 def unwrap_redirect(href: str) -> str:

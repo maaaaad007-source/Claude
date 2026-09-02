@@ -99,10 +99,25 @@ class SearchReport:
     kept: int = 0
     emails_observed: int = 0
     emails_guessed: int = 0
+    dropped_samples: Dict[str, List[str]] = field(default_factory=dict)
     company_pattern: str = ""
     discovered_pattern: str = ""
     enrichment_note: str = ""
     pattern_note: str = ""
+
+    def note_drop(self, reason: str, result) -> None:
+        """Keep a few examples of what each filter discarded.
+
+        A count alone cannot distinguish "the provider returned junk" from
+        "we failed to parse good results" — the two call for opposite fixes,
+        and the difference is only visible in the rows themselves.
+        """
+        kept = self.dropped_samples.setdefault(reason, [])
+        if len(kept) >= 5:
+            return
+        detail = (result.url if reason == "not_profile"
+                  else (result.title or result.url))
+        kept.append(detail[:140])
 
     @property
     def blocked(self) -> bool:
@@ -491,6 +506,7 @@ def find_contacts_detailed(
             if contact is None:
                 setattr(report, "dropped_" + reason,
                         getattr(report, "dropped_" + reason) + 1)
+                report.note_drop(reason, result)
                 continue
             key = _dedupe_key(contact.linkedin_profile, contact.full_name)
             if key in seen:

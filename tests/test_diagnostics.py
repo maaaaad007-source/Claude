@@ -380,3 +380,61 @@ def test_environment_variable_is_read_when_nothing_is_registered(monkeypatch):
     monkeypatch.setattr(search_mod, "_API_KEYS", {})
     monkeypatch.setenv("SERPER_API_KEY", "from-environment")
     assert search_mod.api_key("serper") == "from-environment"
+
+
+# --------------------------------------------------------------------------- #
+# Drop samples — telling "provider junk" apart from "we failed to parse"
+# --------------------------------------------------------------------------- #
+def test_dropped_rows_are_sampled_by_reason(monkeypatch):
+    rows = [
+        SearchResult("Some Blog Post", "https://example.com/blog", "unrelated"),
+        SearchResult("Another Page", "https://news.example.com/x", "unrelated"),
+        SearchResult("Daniel Ek - CEO - Spotify | LinkedIn",
+                     "https://se.linkedin.com/in/daniel-ek", "Spotify"),
+    ]
+
+    def fake(query, session=None, timeout=15.0, pause=1.0):
+        if query.startswith('"@'):
+            return [], [ProviderOutcome("stub", "empty")]
+        return rows, [ProviderOutcome("stub", "ok", rows=len(rows))]
+
+    monkeypatch.setattr(pipeline, "search_detailed", fake)
+    monkeypatch.setattr(pipeline.time, "sleep", lambda *_: None)
+
+    _contacts, report = pipeline.find_contacts_detailed(
+        "Spotify", domain="spotify.com", categories=["CEO / Executive"], pause=0
+    )
+
+    assert report.dropped_not_profile == 2
+    # The URLs are what distinguish provider junk from a parsing failure.
+    assert report.dropped_samples["not_profile"] == [
+        "https://example.com/blog",
+        "https://news.example.com/x",
+    ]
+
+
+def test_drop_samples_are_capped():
+    report = SearchReport()
+    for i in range(20):
+        report.note_drop("not_profile", SearchResult("t", "https://x/%d" % i))
+    assert len(report.dropped_samples["not_profile"]) == 5
+
+
+def test_title_is_sampled_for_non_url_reasons():
+    report = SearchReport()
+    report.note_drop("unparsed_title", SearchResult("Top 10 CEOs", "https://x"))
+    assert report.dropped_samples["unparsed_title"] == ["Top 10 CEOs"]
+
+
+def test_bing_redirect_decodes_whatever_marker_prefix_is_used():
+    """A new Bing marker must not turn every result into a non-profile drop."""
+    import base64
+
+    from executive_finder.search import is_linkedin_profile, unwrap_redirect
+
+    target = "https://se.linkedin.com/in/sundus-umaid"
+    payload = base64.urlsafe_b64encode(target.encode()).decode().rstrip("=")
+    for marker in ("a1", "a2", "a9", "zz", ""):
+        href = "https://www.bing.com/ck/a?!&&u={}{}&ntb=1".format(marker, payload)
+        assert unwrap_redirect(href) == target, marker
+        assert is_linkedin_profile(unwrap_redirect(href))

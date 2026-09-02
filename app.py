@@ -375,6 +375,13 @@ def _render_diagnostics(report, expanded: bool = False) -> None:
                 hide_index=True,
             )
 
+        if report.dropped_samples:
+            st.write("**Examples of what was dropped**")
+            for reason, samples in report.dropped_samples.items():
+                st.caption("{} — {}".format(
+                    reason.replace("_", " "), " · ".join(samples[:3])
+                ))
+
         if report.queries:
             st.code("\n".join(report.queries), language="text")
 
@@ -586,6 +593,15 @@ def main() -> None:
         elif not report.raw_results:
             st.warning("No results for these queries. Try a broader company "
                        "name or drop the country.")
+        elif report.dropped_not_profile == report.raw_results:
+            st.warning(
+                "Found {0} results, but none were LinkedIn profiles. That "
+                "usually means the provider ignored the site: filter and "
+                "padded the page with unrelated results — common when a name "
+                "genuinely has no match. The dropped URLs are below.".format(
+                    report.raw_results
+                )
+            )
         else:
             st.warning(
                 "Found {} results, but none survived filtering.".format(
