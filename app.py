@@ -134,36 +134,37 @@ html, body, [class*="css"] { color: var(--ink); }
 }
 .section-sub { color: var(--muted); font-size: .86rem; margin-bottom: 1rem; }
 
-/* Inputs */
-/* Inputs share the card's border exactly — same token, same width — so the
-   panel reads as one surface rather than boxes inside a box. Streamlit draws
-   its input outline as a box-shadow, which reads as a soft glow next to a
-   crisp 1px card edge, so shadows are cleared on the field and its wrapper. */
+/* One outline per field, identical across every field type.
+   Two defects this corrects: Streamlit wraps a text input in a root element
+   that carries its own border and background — so a text field drew two
+   concentric rings, an 8px wrapper around a 10px input, while the country
+   combobox drew one — and it renders focus rings as box-shadows, which read
+   as a glow beside a crisp 1px edge. The wrapper is neutralised and the one
+   remaining border on each field takes the card's own token. */
+[data-testid="stTextInputRootElement"] {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input,
-[data-testid="stTextInput"] > div,
-[data-testid="stTextInput"] div[class*="react-aria"],
-[data-testid="stSelectbox"] div[class*="react-aria"],
-[data-testid="stSelectbox"] input {
+[data-testid="stSelectbox"] div[role="group"] {
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
   box-shadow: none !important;
   outline: none !important;
 }
-/* The Country field is a combobox, not a text input; it needs the same
-   treatment or it reads as a different kind of control beside the other two. */
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input,
-[data-testid="stSelectbox"] div[data-testid="stSelectboxVirtualDropdown"],
-[data-testid="stSelectbox"] > div > div {
-  border-radius: 10px !important;
-  border: 1px solid var(--line) !important;
-  background: #fff !important;
-}
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input { padding: .6rem .85rem !important; }
-[data-testid="stTextInput"] input:focus,
-[data-testid="stSelectbox"] div[class*="react-aria"]:focus-within {
+
+/* Focus is the same single accent edge everywhere, never a second ring. */
+[data-testid="stTextInput"]:focus-within input,
+[data-testid="stNumberInput"]:focus-within input,
+[data-testid="stSelectbox"]:focus-within div[role="group"] {
   border-color: var(--accent) !important;
   box-shadow: none !important;
+  outline: none !important;
 }
 [data-testid="stForm"] { box-shadow: none !important; }
 
