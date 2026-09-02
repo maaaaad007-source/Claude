@@ -134,33 +134,39 @@ html, body, [class*="css"] { color: var(--ink); }
 }
 .section-sub { color: var(--muted); font-size: .86rem; margin-bottom: 1rem; }
 
-/* One outline per field, identical across every field type.
-   Two defects this corrects: Streamlit wraps a text input in a root element
-   that carries its own border and background — so a text field drew two
-   concentric rings, an 8px wrapper around a 10px input, while the country
-   combobox drew one — and it renders focus rings as box-shadows, which read
-   as a glow beside a crisp 1px edge. The wrapper is neutralised and the one
-   remaining border on each field takes the card's own token. */
-[data-testid="stTextInputRootElement"] {
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input,
+/* One outline per field, drawn on the same kind of element in every case.
+   Streamlit gives a text input an outer root element and a combobox a
+   role="group" wrapper; those are the analogous containers, so the border
+   goes there and the inner control is left bare. Bordering the inner input
+   instead fails quietly: its wrapper is 40px with overflow hidden, so a
+   taller input has its top and bottom edges clipped away and only the left
+   and right survive. Heights are whole pixels because a padding-derived
+   40.78px left the bottom edge between device pixels, rendering it pale. */
+[data-testid="stTextInputRootElement"],
 [data-testid="stSelectbox"] div[role="group"] {
   border: 1px solid var(--line) !important;
   border-radius: 10px !important;
   background: #fff !important;
   box-shadow: none !important;
   outline: none !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
 }
 [data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input { padding: .6rem .85rem !important; }
+[data-testid="stNumberInput"] input {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  height: 40px !important;
+  padding: 0 .85rem !important;
+}
 
-/* Focus is the same single accent edge everywhere, never a second ring. */
-[data-testid="stTextInput"]:focus-within input,
-[data-testid="stNumberInput"]:focus-within input,
+/* Focus is the same single accent edge on every field, never a second ring. */
+[data-testid="stTextInput"]:focus-within [data-testid="stTextInputRootElement"],
+[data-testid="stNumberInput"]:focus-within [data-testid="stTextInputRootElement"],
 [data-testid="stSelectbox"]:focus-within div[role="group"] {
   border-color: var(--accent) !important;
   box-shadow: none !important;
