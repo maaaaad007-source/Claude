@@ -18,7 +18,7 @@ The app opens on <http://localhost:8501>.
 
 ## Using it
 
-The top control panel takes three inputs:
+The top control panel takes four inputs:
 
 | Input | Required | Notes |
 | :--- | :--- | :--- |
@@ -152,7 +152,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-199 tests cover cover query construction, redirect unwrapping (including Bing's
+199 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
