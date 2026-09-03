@@ -18,12 +18,11 @@ The app opens on <http://localhost:8501>.
 
 ## Using it
 
-The top control panel takes four inputs:
+The top control panel takes three inputs:
 
 | Input | Required | Notes |
 | :--- | :--- | :--- |
 | **Company Name** | Yes | The target organisation — `Volvo`, `Spotify`, `IKEA` |
-| **Person** | No | Search for one named person instead of sweeping roles |
 | **Company Domain** | No | `volvocars.com`. Defaults to `companyname.com` when blank |
 | **Country** | No | Suggests the 51 countries the filter can verify; typing anything else is still accepted |
 
@@ -53,21 +52,6 @@ of every address is preserved in the file even though it is off screen.
 
 Results are cached for one hour per input combination, and the full matrix can
 be exported with **Download CSV**.
-
-## Searching for one person
-
-Naming someone in the **Person** field replaces the role sweep with a single
-query for that person at the company, so five requests become one.
-
-The name is then the only test a result has to pass. That matters: a named
-search must not be gated on the role matrix, or looking someone up would fail
-precisely when their title is not one the app recognises. Names are compared on
-sanitised tokens, so case, accents and punctuation are ignored, and every token
-typed must be present — `Daniel Ek` matches `Daniel P. Ek` but not `Anna Ek`.
-
-A recognisable title is still classified normally; anything else is filed as
-`Named search`. The country filter and email resolution apply exactly as they do
-to a role sweep.
 
 ## Roles
 
@@ -152,7 +136,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-199 tests cover query construction, redirect unwrapping (including Bing's
+186 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the

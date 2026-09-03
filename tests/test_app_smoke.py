@@ -45,10 +45,9 @@ def stub_network(monkeypatch):
     monkeypatch.setattr(pipeline.time, "sleep", lambda *_: None)
 
 
-def _fill_and_submit(at, company="Spotify", person=""):
+def _fill_and_submit(at, company="Spotify"):
     at.text_input[0].set_value(company)          # Company
-    at.text_input[1].set_value(person)           # Person
-    at.text_input[2].set_value("spotify.com")    # Domain
+    at.text_input[1].set_value("spotify.com")    # Domain
     at.button[0].click()
     return at.run(timeout=TIMEOUT)
 
@@ -65,15 +64,6 @@ def test_a_role_sweep_runs_and_reruns_without_exceptions():
     assert not at.exception, [str(e) for e in at.exception]
 
     at = _fill_and_submit(at)
-    assert not at.exception, [str(e) for e in at.exception]
-
-
-def test_a_named_search_runs_and_reruns_without_exceptions():
-    at = AppTest.from_file(APP, default_timeout=TIMEOUT).run()
-    at = _fill_and_submit(at, person="Daniel Ek")
-    assert not at.exception, [str(e) for e in at.exception]
-
-    at = _fill_and_submit(at, person="Daniel Ek")
     assert not at.exception, [str(e) for e in at.exception]
 
 
