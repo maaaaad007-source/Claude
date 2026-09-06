@@ -466,10 +466,14 @@ def test_a_silent_snippet_is_country_unknown_not_wrong_country(monkeypatch):
                           "https://www.linkedin.com/in/jan-de-vries", "Arrise")
     elsewhere = SearchResult("Vijay Rathore - Chief Executive Officer - Arrise",
                              "https://in.linkedin.com/in/vijay-rathore", "Arrise")
-    monkeypatch.setattr(
-        pipeline, "search_detailed",
-        lambda *a, **k: ([silent, elsewhere],
-                         [ProviderOutcome("stub", "ok", rows=2)]))
+    def fake(query, session=None, timeout=15.0, pause=1.0):
+        # Neither profile is indexed on nl.linkedin.com, so the scoped query
+        # finds nothing and the global fallback supplies both rows.
+        if "nl.linkedin.com" in query:
+            return [], [ProviderOutcome("stub", "empty")]
+        return [silent, elsewhere], [ProviderOutcome("stub", "ok", rows=2)]
+
+    monkeypatch.setattr(pipeline, "search_detailed", fake)
     monkeypatch.setattr(pipeline.time, "sleep", lambda *_: None)
 
     _, strict = pipeline.find_contacts_detailed(

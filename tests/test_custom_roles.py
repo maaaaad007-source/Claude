@@ -86,7 +86,9 @@ def test_a_typed_role_is_searched_as_itself(monkeypatch):
         "Spotify", domain="spotify.com", country="Sweden",
         categories=["Head of Marketing"], pause=0,
     )
-    assert queries == ['site:linkedin.com/in/ "Spotify" "Head of Marketing" "Sweden"']
+    # The country lives in the host, not in the terms: scoping the site is a
+    # hard constraint where a quoted country name is only a ranking hint.
+    assert queries == ['site:se.linkedin.com/in/ "Spotify" "Head of Marketing"']
     # The CTO row still survives because the snippet names the company.
     assert contacts and contacts[0].full_name == "Gustav Söderström"
 

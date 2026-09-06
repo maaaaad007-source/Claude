@@ -99,8 +99,10 @@ tests/                        Unit tests (pytest)
    category's keywords so a full sweep costs five requests rather than twenty:
 
    ```
-   site:linkedin.com/in/ "Spotify" ("CEO" OR "Chief Executive Officer" …) "Sweden"
+   site:se.linkedin.com/in/ "Spotify" ("CEO" OR "Chief Executive Officer" …)
    ```
+
+   The host carries the country — see step 4.
 
 2. **User-Agent spoofing** — requests carry rotating desktop browser headers
    (`Mozilla/5.0 …`) plus `Accept-Language` and `Sec-Fetch-*`, which keeps search
@@ -113,13 +115,35 @@ tests/                        Unit tests (pytest)
    headers are split into name and designation. Listing pages, company pages and
    post excerpts are rejected by a name-plausibility check.
 
-4. **Country filtering** — the country in the query is only a ranking hint, so
-   results from other markets leak through. A positive check runs on each
-   result: the LinkedIn locale subdomain (`se.linkedin.com` → Sweden), the
-   country named in the text (including endonyms like *Sverige*), or a known
-   city of that country. Read `geo.py`.
+4. **Country scoping** — a quoted country name in a query is only a ranking
+   hint: engines treat it as one term among many and return other markets
+   anyway. So the country goes in the **host** instead, where it is a hard
+   constraint:
 
-5. **Email resolution** — see below.
+   ```
+   site:nl.linkedin.com/in/ "Arrise" ("CEO" OR "Chief Executive Officer" …)
+   ```
+
+   LinkedIn serves a member's profile from the subdomain of the country they
+   are in, so `nl.linkedin.com/in/` *is* a corpus of people in the Netherlands
+   — and it is the same signal the filter in step 5 checks, so results arrive
+   already passing it. The country term is then dropped rather than kept:
+   the host has said it, and demanding the literal word as well would discard
+   every profile whose headline omits it.
+
+   Not every profile is indexed under its country's host, so an empty locale
+   corpus falls back to the global one with the country as a term. The
+   fallback costs a second request per role and only fires when the scoped
+   query found nothing usable. When a key is configured, Serper and Brave are
+   also asked for that country's index (`gl` / `country`).
+
+5. **Country filtering** — scoping raises precision but does not guarantee it,
+   and the fallback path is unscoped by definition, so a positive check still
+   runs on each result: the LinkedIn locale subdomain (`se.linkedin.com` →
+   Sweden), the country named in the text (including endonyms like *Sverige*),
+   or a known city of that country. Read `geo.py`.
+
+6. **Email resolution** — see below.
 
 Providers are tried in order — Serper and Brave first when an API key is
 configured, then the scraped front-ends (DuckDuckGo HTML, DuckDuckGo Lite, Bing,
@@ -136,7 +160,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-195 tests cover query construction, redirect unwrapping (including Bing's
+209 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the

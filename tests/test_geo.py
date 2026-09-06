@@ -249,3 +249,123 @@ def test_every_supported_country_has_a_locale_hint():
     from executive_finder.geo import SUPPORTED_COUNTRIES, locale_hint
 
     assert all(locale_hint(name) for name in SUPPORTED_COUNTRIES)
+
+
+# --------------------------------------------------------------------------- #
+# Country-scoped search strategy
+# --------------------------------------------------------------------------- #
+DUTCH = SearchResult(
+    "Jan de Vries - Chief Executive Officer - Volvo | LinkedIn",
+    "https://nl.linkedin.com/in/jan-de-vries", "Volvo · Amsterdam")
+
+
+def _recording_stub(monkeypatch, by_query):
+    """Answer each X-Ray query from ``by_query``, recording the order they arrive.
+
+    Only ``site:`` queries are recorded — the email-pattern discovery pass
+    issues its own ``"@domain"`` search through the same function, and counting
+    it would make every assertion about request count wrong by one.
+    """
+    seen = []
+
+    def fake(query, session=None, timeout=15.0, pause=1.0):
+        if not query.startswith("site:"):
+            return [], [ProviderOutcome("stub", "empty")]
+        seen.append(query)
+        rows = by_query(query)
+        return rows, [ProviderOutcome("stub", "ok" if rows else "empty",
+                                      rows=len(rows))]
+
+    monkeypatch.setattr(pipeline, "search_detailed", fake)
+    return seen
+
+
+def test_the_country_search_asks_that_countrys_linkedin_first(monkeypatch):
+    seen = _recording_stub(monkeypatch, lambda q: [DUTCH])
+
+    contacts, _ = pipeline.find_contacts_detailed(
+        "Volvo", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="strict", pause=0,
+    )
+    assert seen == ['site:nl.linkedin.com/in/ "Volvo" ("CEO" OR '
+                    '"Chief Executive Officer" OR "Managing Director" OR '
+                    '"President" OR "Country Head")']
+    assert [c.full_name for c in contacts] == ["Jan de Vries"]
+
+
+def test_an_empty_locale_corpus_falls_back_to_the_global_host(monkeypatch):
+    """Not every profile is indexed under its country's host; don't give up."""
+    seen = _recording_stub(
+        monkeypatch, lambda q: [] if "nl.linkedin.com" in q else [DUTCH])
+
+    contacts, _ = pipeline.find_contacts_detailed(
+        "Volvo", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="strict", pause=0,
+    )
+    assert len(seen) == 2
+    assert "nl.linkedin.com" in seen[0]
+    assert seen[1].startswith("site:linkedin.com/in/")
+    assert '"Netherlands"' in seen[1]
+    assert [c.full_name for c in contacts] == ["Jan de Vries"]
+
+
+def test_no_fallback_is_spent_when_the_scoped_query_delivered(monkeypatch):
+    """The fallback doubles the request count; it must stay a fallback."""
+    seen = _recording_stub(monkeypatch, lambda q: [DUTCH])
+
+    pipeline.find_contacts_detailed(
+        "Volvo", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="strict", pause=0,
+    )
+    assert len(seen) == 1
+
+
+def test_a_scoped_query_that_returns_only_junk_still_falls_back(monkeypatch):
+    """Rows that all get filtered out are as good as none — keep looking."""
+    junk = SearchResult("Top 10 CEOs to watch", "https://example.com/list", "")
+    seen = _recording_stub(
+        monkeypatch, lambda q: [junk] if "nl.linkedin.com" in q else [DUTCH])
+
+    contacts, _ = pipeline.find_contacts_detailed(
+        "Volvo", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="strict", pause=0,
+    )
+    assert len(seen) == 2
+    assert [c.full_name for c in contacts] == ["Jan de Vries"]
+
+
+def test_no_country_means_no_scoping_and_no_fallback(monkeypatch):
+    seen = _recording_stub(monkeypatch, lambda q: [SWEDISH])
+
+    pipeline.find_contacts_detailed(
+        "Volvo", categories=["CEO / Executive"], pause=0,
+    )
+    assert len(seen) == 1
+    assert seen[0].startswith("site:linkedin.com/in/")
+
+
+def test_an_unrecognised_country_is_not_scoped(monkeypatch):
+    """There is no atlantis.linkedin.com to search."""
+    seen = _recording_stub(monkeypatch, lambda q: [SWEDISH])
+
+    pipeline.find_contacts_detailed(
+        "Volvo", country="Atlantis", categories=["CEO / Executive"], pause=0,
+    )
+    assert len(seen) == 1
+    assert seen[0].startswith("site:linkedin.com/in/")
+    assert '"Atlantis"' in seen[0]
+
+
+def test_the_provider_region_bias_follows_the_country(monkeypatch):
+    from executive_finder.search import region_code
+
+    _recording_stub(monkeypatch, lambda q: [DUTCH])
+    pipeline.find_contacts_detailed(
+        "Volvo", country="Netherlands", categories=["CEO / Executive"], pause=0,
+    )
+    assert region_code() == "nl"
+
+    pipeline.find_contacts_detailed(
+        "Volvo", categories=["CEO / Executive"], pause=0,
+    )
+    assert region_code() == ""

@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 __all__ = [
     "SUPPORTED_COUNTRIES",
     "CountryVerdict",
+    "country_code",
     "country_match",
     "known_country",
     "locale_hint",
@@ -193,18 +194,35 @@ def known_country(country: str) -> bool:
     return bool(_canonical(country))
 
 
+# Where a country accepts several locales, the one LinkedIn actually serves its
+# profiles from. Both alternatives are still accepted as evidence by
+# country_match(); this only picks which host to *search* and to quote at the
+# user, and picking the wrong one would scope a query to an empty corpus.
+_PREFERRED_LOCALE: Dict[str, str] = {
+    "united kingdom": "uk",   # not gb
+    "united states": "us",    # not www, which is the generic host
+}
+
+
+def country_code(country: str) -> str:
+    """The LinkedIn locale code for ``country`` ('nl'), or '' if unrecognised."""
+    canonical = _canonical(country)
+    if not canonical:
+        return ""
+    preferred = _PREFERRED_LOCALE.get(canonical)
+    if preferred:
+        return preferred
+    return sorted(_LOCALES[canonical])[0]
+
+
 def locale_hint(country: str) -> str:
     """The LinkedIn host that proves a profile is in ``country``, for the UI.
 
     Returns e.g. ``nl.linkedin.com`` for the Netherlands, or '' for a country
-    the filter does not recognise.  Where a country has several accepted
-    locales the shortest is used — it is illustrative, not exhaustive.
+    the filter does not recognise.
     """
-    canonical = _canonical(country)
-    if not canonical:
-        return ""
-    accepted = sorted(_LOCALES[canonical] - {"www"}) or sorted(_LOCALES[canonical])
-    return "{}.linkedin.com".format(min(accepted, key=len))
+    code = country_code(country)
+    return "{}.linkedin.com".format(code) if code else ""
 
 
 def locale_of(url: str) -> str:

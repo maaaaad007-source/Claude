@@ -99,3 +99,93 @@ def test_parse_bing_unpacks_nodes_and_skips_broken_ones():
 def test_parsers_tolerate_empty_html():
     assert parse_duckduckgo("") == []
     assert parse_bing("<html><body>blocked</body></html>") == []
+
+
+# --------------------------------------------------------------------------- #
+# Country-scoped querying
+# --------------------------------------------------------------------------- #
+def test_a_scoped_query_puts_the_country_in_the_host_not_the_terms():
+    from executive_finder.search import build_query
+
+    assert build_query("Arrise", ["CEO"], "Netherlands", country_scoped=True) == (
+        'site:nl.linkedin.com/in/ "Arrise" "CEO"'
+    )
+
+
+def test_an_unscoped_query_is_unchanged():
+    from executive_finder.search import build_query
+
+    assert build_query("Arrise", ["CEO"], "Netherlands") == (
+        'site:linkedin.com/in/ "Arrise" "CEO" "Netherlands"'
+    )
+
+
+def test_scoping_an_unrecognised_country_keeps_it_as_a_search_term():
+    """Silently dropping it would search the whole world and say nothing."""
+    from executive_finder.search import build_query
+
+    query = build_query("Arrise", ["CEO"], "Atlantis", country_scoped=True)
+    assert query == 'site:linkedin.com/in/ "Arrise" "CEO" "Atlantis"'
+
+
+def test_the_uk_scopes_to_uk_not_gb():
+    """LinkedIn serves British profiles from uk.linkedin.com; gb is a synonym."""
+    from executive_finder.search import linkedin_site
+
+    assert linkedin_site("United Kingdom") == "uk.linkedin.com/in/"
+    assert linkedin_site("United States") == "us.linkedin.com/in/"
+    assert linkedin_site("") == "linkedin.com/in/"
+    assert linkedin_site("Atlantis") == "linkedin.com/in/"
+
+
+def test_a_scoped_result_passes_the_country_filter_by_construction():
+    """The point of scoping: the host is the evidence the filter looks for."""
+    from executive_finder.geo import country_match
+    from executive_finder.search import linkedin_site
+
+    host = linkedin_site("Netherlands").split("/")[0]
+    verdict = country_match(
+        "Netherlands", "https://{}/in/jan-de-vries".format(host), "Arrise")
+    assert verdict.matches
+
+
+def test_the_region_bias_is_set_and_cleared():
+    from executive_finder.search import configure_region, region_code
+
+    configure_region("Netherlands")
+    assert region_code() == "nl"
+    configure_region("Atlantis")
+    assert region_code() == ""
+    configure_region("United States")
+    assert region_code() == "us"
+    configure_region("")
+    assert region_code() == ""
+
+
+def test_serper_sends_the_region_and_omits_it_when_unset(monkeypatch):
+    from executive_finder import search as search_mod
+
+    sent = []
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"organic": []}
+
+    class FakeSession:
+        def post(self, url, json=None, headers=None, timeout=None):
+            sent.append(json)
+            return FakeResponse()
+
+    monkeypatch.setattr(search_mod, "api_key", lambda name: "key")
+    search_mod.configure_region("Netherlands")
+    search_mod._fetch_serper(FakeSession(), "q", 5.0)
+    search_mod.configure_region("")
+    search_mod._fetch_serper(FakeSession(), "q", 5.0)
+
+    assert sent[0] == {"q": "q", "gl": "nl"}
+    assert sent[1] == {"q": "q"}

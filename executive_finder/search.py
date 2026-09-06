@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 import requests
 from bs4 import BeautifulSoup
 
+from .geo import country_code
+
 __all__ = [
     "PROVIDERS",
     "Provider",
@@ -29,7 +31,9 @@ __all__ = [
     "build_query",
     "canonical_linkedin_url",
     "configure_api_keys",
+    "configure_region",
     "is_linkedin_profile",
+    "linkedin_site",
     "looks_blocked",
     "parse_bing",
     "parse_ddg_lite",
@@ -100,10 +104,23 @@ def _quote(term: str) -> str:
     return '"{}"'.format(term.strip().replace('"', ""))
 
 
+def linkedin_site(country: str = "") -> str:
+    """The ``site:`` host to search for ``country`` — its LinkedIn locale.
+
+    LinkedIn serves a member's profile from the subdomain of the country they
+    are in, so ``nl.linkedin.com/in/`` is a corpus of people in the
+    Netherlands.  Falls back to the global host for a country we have no
+    locale for.
+    """
+    code = country_code(country)
+    return "{}.linkedin.com/in/".format(code) if code else LINKEDIN_SITE
+
+
 def build_query(
     company: str,
     role_keywords: Iterable[str],
     country: str = "",
+    country_scoped: bool = False,
 ) -> str:
     """Build an X-Ray query for one company / role group / region.
 
@@ -111,6 +128,18 @@ def build_query(
     which keeps the number of outbound requests to one per category::
 
         site:linkedin.com/in/ "Spotify" ("CEO" OR "Chief Executive Officer") "Sweden"
+
+    ``country_scoped`` moves the country out of the search terms and into the
+    host, which is the difference between asking and requiring::
+
+        site:se.linkedin.com/in/ "Spotify" ("CEO" OR "Chief Executive Officer")
+
+    Quoting a country name only nudges the ranking — engines treat it as one
+    term among many and happily return other markets.  Scoping the host is a
+    hard constraint, and it is the same signal the country filter checks, so
+    results come back already passing it.  The country term is then dropped
+    rather than kept: the host has said it, and demanding the literal word as
+    well would discard every profile whose headline omits it.
     """
     if not company or not company.strip():
         raise ValueError("company is required to build a query")
@@ -119,12 +148,16 @@ def build_query(
     if not keywords:
         raise ValueError("at least one role keyword is required")
 
-    parts = ["site:" + LINKEDIN_SITE, _quote(company)]
+    # An unrecognised country has no locale to scope to; keep it as a term.
+    scoped = bool(country_scoped and country_code(country))
+
+    parts = ["site:" + (linkedin_site(country) if scoped else LINKEDIN_SITE),
+             _quote(company)]
     if len(keywords) == 1:
         parts.append(_quote(keywords[0]))
     else:
         parts.append("(" + " OR ".join(_quote(kw) for kw in keywords) + ")")
-    if country and country.strip():
+    if country and country.strip() and not scoped:
         parts.append(_quote(country))
     return " ".join(parts)
 
@@ -433,6 +466,34 @@ def api_key(name: str) -> str:
     return _API_KEYS.get(name) or os.environ.get("{}_API_KEY".format(name.upper()), "")
 
 
+_REGION: Dict[str, str] = {}
+
+
+def configure_region(country: str = "") -> None:
+    """Bias the API providers towards ``country``, or clear the bias.
+
+    Google returns a different index depending on where it thinks you are, and
+    from a datacenter that is nowhere in particular.  Serper and Brave both
+    accept a country code; setting it puts a thumb on the scale for local
+    results before any of our own filtering runs.
+
+    Set at module level rather than threaded through ``search_detailed`` so the
+    provider signature — which every stub and fake in the tests mirrors — stays
+    as it is.  An empty country clears it, so a run without one is never
+    biased by the previous run's.
+    """
+    code = country_code(country)
+    if code and code != "www":
+        _REGION["gl"] = code
+    else:
+        _REGION.pop("gl", None)
+
+
+def region_code() -> str:
+    """The country code currently biasing API providers, or ''."""
+    return _REGION.get("gl", "")
+
+
 def _raise_for_api_status(response, provider: str) -> None:
     """Raise with the API's own error body, which explains far more than a code."""
     if response.ok:
@@ -448,9 +509,12 @@ def _fetch_serper(session: requests.Session, query: str, timeout: float) -> List
     if not key:
         raise SearchError("no Serper API key configured")
     # Minimal documented body — extra parameters are the usual cause of a 400.
+    body = {"q": query}
+    if region_code():
+        body["gl"] = region_code()
     response = session.post(
         SERPER_ENDPOINT,
-        json={"q": query},
+        json=body,
         headers={"X-API-KEY": key, "Content-Type": "application/json"},
         timeout=timeout,
     )
@@ -470,9 +534,12 @@ def _fetch_brave(session: requests.Session, query: str, timeout: float) -> List[
     key = api_key("brave")
     if not key:
         raise SearchError("no Brave API key configured")
+    params = {"q": query, "count": 20}
+    if region_code():
+        params["country"] = region_code().upper()
     response = session.get(
         BRAVE_ENDPOINT,
-        params={"q": query, "count": 20},
+        params=params,
         headers={"X-Subscription-Token": key, "Accept": "application/json"},
         timeout=timeout,
     )

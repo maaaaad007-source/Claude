@@ -31,6 +31,7 @@ from .search import (
     SearchError,
     SearchResult,
     build_query,
+    configure_region,
     canonical_linkedin_url,
     is_linkedin_profile,
     search_detailed,
@@ -473,6 +474,10 @@ def find_contacts_detailed(
     country_mode = country_filter if (country.strip() and
                                       known_country(country)) else "off"
 
+    # Bias the API providers to the same region the queries are scoped to.
+    # Cleared when there is no country, so one run never inherits the last.
+    configure_region(country if country_mode != "off" else "")
+
     contacts: List[Contact] = []
     seen: set = set()
     report = SearchReport()
@@ -482,38 +487,58 @@ def find_contacts_detailed(
         if progress:
             progress("Searching {}\u2026".format(category), index / len(selected))
 
-        query = build_query(company, roles.keywords_for(category), country)
-        report.queries.append(query)
-        try:
-            results, outcomes = search_detailed(
-                query, session=session, pause=min(pause, 1.0)
-            )
-        except SearchError as exc:
-            failures.append(str(exc))
-            results, outcomes = [], getattr(exc, "outcomes", [])
-        report.outcomes.extend(outcomes)
-        report.raw_results += len(results)
+        before = len(contacts)
 
-        kept = 0
-        for result in results:
-            if kept >= max_per_category:
-                break
-            contact, reason = _to_contact(
-                result, company, country, mail_domain, email_pattern,
-                category, tokens, require_company, country_mode,
-            )
-            if contact is None:
-                setattr(report, "dropped_" + reason,
-                        getattr(report, "dropped_" + reason) + 1)
-                report.note_drop(reason, result)
-                continue
-            key = _dedupe_key(contact.linkedin_profile, contact.full_name)
-            if key in seen:
-                report.dropped_duplicate += 1
-                continue
-            seen.add(key)
-            contacts.append(contact)
-            kept += 1
+        def run(query: str) -> int:
+            """Search, filter, and return how many contacts this query added."""
+            report.queries.append(query)
+            try:
+                results, outcomes = search_detailed(
+                    query, session=session, pause=min(pause, 1.0)
+                )
+            except SearchError as exc:
+                failures.append(str(exc))
+                results, outcomes = [], getattr(exc, "outcomes", [])
+            report.outcomes.extend(outcomes)
+            report.raw_results += len(results)
+
+            added = 0
+            for result in results:
+                if len(contacts) - before >= max_per_category:
+                    break
+                contact, reason = _to_contact(
+                    result, company, country, mail_domain, email_pattern,
+                    category, tokens, require_company, country_mode,
+                )
+                if contact is None:
+                    setattr(report, "dropped_" + reason,
+                            getattr(report, "dropped_" + reason) + 1)
+                    report.note_drop(reason, result)
+                    continue
+                key = _dedupe_key(contact.linkedin_profile, contact.full_name)
+                if key in seen:
+                    report.dropped_duplicate += 1
+                    continue
+                seen.add(key)
+                contacts.append(contact)
+                added += 1
+            return added
+
+        # Ask the country's own LinkedIn first. Scoping the host is a hard
+        # constraint where a quoted country name is only a hint, so this is
+        # what stops a sweep coming back full of the wrong market.
+        if country_mode != "off":
+            found = run(build_query(company, roles.keywords_for(category),
+                                    country, country_scoped=True))
+            # Not every profile of a person in a country is indexed under that
+            # country's host, so an empty locale corpus must not end the search
+            # — fall back to the global one and let the filter judge the rows.
+            if not found:
+                if pause:
+                    time.sleep(min(pause, 1.0))
+                run(build_query(company, roles.keywords_for(category), country))
+        else:
+            run(build_query(company, roles.keywords_for(category), country))
 
         if pause and index < len(selected) - 1:
             time.sleep(pause)
