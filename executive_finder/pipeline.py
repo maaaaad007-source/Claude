@@ -94,6 +94,7 @@ class SearchReport:
     dropped_unparsed_title: int = 0
     dropped_off_target: int = 0
     dropped_wrong_country: int = 0
+    dropped_country_unknown: int = 0
     dropped_duplicate: int = 0
     kept: int = 0
     emails_observed: int = 0
@@ -130,6 +131,11 @@ class SearchReport:
         return any(o.status == "ok" for o in self.outcomes)
 
     @property
+    def dropped_country(self) -> int:
+        """Every row the country filter took, on either kind of evidence."""
+        return self.dropped_wrong_country + self.dropped_country_unknown
+
+    @property
     def dominant_drop(self) -> str:
         """Which filter discarded the most rows, or '' when nothing was dropped.
 
@@ -138,9 +144,13 @@ class SearchReport:
         found the wrong people, providers padding the page with non-profiles, or
         headlines we could not parse.  Telling the user which one it was is the
         difference between an actionable message and a shrug.
+
+        The country filter counts as one bucket here even though it keeps two
+        counters; which of the two dominates changes the wording of the advice,
+        not who is responsible for the empty page.
         """
         counts = {
-            "wrong_country": self.dropped_wrong_country,
+            "country": self.dropped_country,
             "off_target": self.dropped_off_target,
             "not_profile": self.dropped_not_profile,
             "unparsed_title": self.dropped_unparsed_title,
@@ -152,13 +162,15 @@ class SearchReport:
     def summary(self) -> str:
         return (
             "{raw} raw results — dropped {np} non-profile, {ut} unparseable, "
-            "{ot} off-target, {wc} wrong-country, {dup} duplicate; "
+            "{ot} off-target, {wc} wrong-country, {cu} country unknown, "
+            "{dup} duplicate; "
             "kept {kept} ({obs} observed emails, {gs} guessed)".format(
                 raw=self.raw_results,
                 np=self.dropped_not_profile,
                 ut=self.dropped_unparsed_title,
                 ot=self.dropped_off_target,
                 wc=self.dropped_wrong_country,
+                cu=self.dropped_country_unknown,
                 dup=self.dropped_duplicate,
                 kept=self.kept,
                 obs=self.emails_observed,
@@ -270,6 +282,13 @@ def _finish(parsed, result, country, domain, pattern, category, country_mode):
             strict=(country_mode == "strict"),
         )
         if not verdict.matches:
+            # Two different drops wearing one name. "Hosted on de.linkedin.com"
+            # is proof the person is elsewhere; "no country evidence" only means
+            # the snippet was silent. Relaxing the filter recovers the second
+            # entirely and the first not at all, so the UI has to tell them
+            # apart to give advice worth following.
+            if verdict.reason == "no country evidence":
+                return None, "country_unknown"
             return None, "wrong_country"
 
     contact = Contact(

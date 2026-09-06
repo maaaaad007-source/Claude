@@ -130,7 +130,12 @@ def test_strict_country_filter_keeps_only_the_target_market(monkeypatch):
         categories=["CEO / Executive"], country_filter="strict", pause=0,
     )
     assert [c.full_name for c in contacts] == ["Jim Rowan"]
-    assert report.dropped_wrong_country == 2
+    assert report.dropped_country == 2
+    # Klaus is on de.linkedin.com — proof he is elsewhere. Pat is on the
+    # generic host and names a US city, which is only evidence against
+    # Sweden in strict mode.
+    assert report.dropped_wrong_country == 1
+    assert report.dropped_country_unknown == 1
 
 
 def test_country_filter_off_keeps_everyone(monkeypatch):

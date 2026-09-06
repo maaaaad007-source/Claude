@@ -347,7 +347,8 @@ SERPER_API_KEY = "your-key-here"
     )
 
 
-def _no_survivors_message(report, country: str, country_filter: str) -> str:
+def _no_survivors_message(report, country: str, country_filter: str,
+                          company: str = "") -> str:
     """Explain an empty result set by naming the filter that emptied it.
 
     "None survived filtering" is true of four different failures with four
@@ -357,28 +358,37 @@ def _no_survivors_message(report, country: str, country_filter: str) -> str:
     head = "Found {} results, but none survived filtering.".format(
         report.raw_results
     )
-    share = "{} of {}".format(report.dropped_wrong_country, report.raw_results)
+    where = country or "the country"
 
-    if report.dominant_drop == "wrong_country":
-        if country_filter == "strict":
+    if report.dominant_drop == "country":
+        share = "{} of {}".format(report.dropped_country, report.raw_results)
+        elsewhere = report.dropped_wrong_country
+        unknown = report.dropped_country_unknown
+
+        if unknown and country_filter == "strict":
             host = locale_hint(country)
             evidence = "the country named, or one of its cities"
             if host:
                 evidence = "a `{}` profile, {}".format(host, evidence)
+            tail = ""
+            if elsewhere:
+                tail = (" The other {} are hosted on another country's "
+                        "LinkedIn and will stay dropped.".format(elsewhere))
             return (
-                "{} The country filter removed {} — strict mode keeps a result "
-                "only when it carries evidence of **{}** ({}), and most "
-                "LinkedIn headlines carry none. Try **Relaxed**, which drops "
-                "only profiles hosted on another country's LinkedIn, or "
-                "**Off**.".format(head, share, country or "the country", evidence)
+                "{} The country filter removed {}. Of those, **{} said nothing "
+                "about location at all** — strict mode needs evidence of **{}** "
+                "({}), and most LinkedIn headlines carry none. Switch to "
+                "**Relaxed** to get those {} back.{}".format(
+                    head, share, unknown, where, evidence, unknown, tail
+                )
             )
+
         return (
-            "{} The country filter removed {} — those profiles are hosted on "
-            "another country's LinkedIn, so they are positively not in "
-            "**{}**. This company may have no leadership there. Set country "
-            "match to **Off** to see every market.".format(
-                head, share, country or "the country"
-            )
+            "{} The country filter removed {}, and every one was positively "
+            "somewhere else — hosted on another country's LinkedIn. **{}** may "
+            "have nobody in these roles in {}. Relaxing the filter will not "
+            "change this; set country match to **Off** to see every "
+            "market.".format(head, share, company or "This company", where)
         )
 
     if report.dominant_drop == "off_target":
@@ -640,7 +650,8 @@ def main() -> None:
             )
         else:
             st.warning(_no_survivors_message(
-                report, country.strip(), options["country_filter"]))
+                report, country.strip(), options["country_filter"],
+                resolved_company))
         _render_diagnostics(report, expanded=True)
         return
 

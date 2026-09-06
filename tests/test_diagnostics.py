@@ -441,34 +441,72 @@ def test_bing_redirect_decodes_whatever_marker_prefix_is_used():
 
 
 def test_dominant_drop_names_the_filter_that_emptied_the_run():
-    report = SearchReport(raw_results=27, dropped_not_profile=10,
-                          dropped_wrong_country=17)
-    assert report.dominant_drop == "wrong_country"
+    report = SearchReport(raw_results=33, dropped_not_profile=10,
+                          dropped_off_target=6, dropped_wrong_country=17)
+    assert report.dominant_drop == "country"
+
+
+def test_the_country_bucket_counts_both_kinds_of_country_drop():
+    """Split across two counters, the country filter can lose to non-profiles."""
+    report = SearchReport(raw_results=33, dropped_not_profile=12,
+                          dropped_wrong_country=11, dropped_country_unknown=10)
+    assert report.dropped_country == 21
+    assert report.dominant_drop == "country"
 
 
 def test_dominant_drop_is_empty_when_nothing_was_dropped():
     assert SearchReport(raw_results=3, kept=3).dominant_drop == ""
 
 
-def test_the_empty_message_tells_a_strict_country_run_what_to_change():
+def test_a_silent_snippet_is_country_unknown_not_wrong_country(monkeypatch):
+    """Relaxed recovers one and not the other, so they cannot share a counter."""
+    from executive_finder.search import ProviderOutcome, SearchResult
+
+    silent = SearchResult("Jan de Vries - Chief Executive Officer - Arrise",
+                          "https://www.linkedin.com/in/jan-de-vries", "Arrise")
+    elsewhere = SearchResult("Vijay Rathore - Chief Executive Officer - Arrise",
+                             "https://in.linkedin.com/in/vijay-rathore", "Arrise")
+    monkeypatch.setattr(
+        pipeline, "search_detailed",
+        lambda *a, **k: ([silent, elsewhere],
+                         [ProviderOutcome("stub", "ok", rows=2)]))
+    monkeypatch.setattr(pipeline.time, "sleep", lambda *_: None)
+
+    _, strict = pipeline.find_contacts_detailed(
+        "Arrise", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="strict", pause=0)
+    assert (strict.dropped_country_unknown, strict.dropped_wrong_country) == (1, 1)
+
+    kept, relaxed = pipeline.find_contacts_detailed(
+        "Arrise", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="relaxed", pause=0)
+    assert [c.full_name for c in kept] == ["Jan de Vries"]
+    assert (relaxed.dropped_country_unknown, relaxed.dropped_wrong_country) == (0, 1)
+
+
+def test_the_empty_message_offers_relaxed_when_snippets_were_silent():
     """A bare "none survived filtering" leaves the user with nothing to do."""
     import app
 
-    report = SearchReport(raw_results=27, dropped_not_profile=10,
-                          dropped_wrong_country=17)
-    message = app._no_survivors_message(report, "Netherlands", "strict")
-    assert "17 of 27" in message
+    report = SearchReport(raw_results=33, dropped_not_profile=10,
+                          dropped_wrong_country=6, dropped_country_unknown=17)
+    message = app._no_survivors_message(report, "Netherlands", "strict", "Arrise")
+    assert "23 of 33" in message
     assert "nl.linkedin.com" in message
     assert "Relaxed" in message
+    assert "other 6" in message
 
 
-def test_the_empty_message_does_not_offer_relaxed_when_already_relaxed():
+def test_the_empty_message_does_not_promise_relaxed_will_help_when_it_cannot():
+    """Every drop positively elsewhere: relaxing recovers exactly nothing."""
     import app
 
     report = SearchReport(raw_results=27, dropped_wrong_country=27)
-    message = app._no_survivors_message(report, "Netherlands", "relaxed")
-    assert "Relaxed" not in message
-    assert "Off" in message
+    for mode in ("strict", "relaxed"):
+        message = app._no_survivors_message(report, "Netherlands", mode, "Arrise")
+        assert "Relaxing the filter will not change this" in message
+        assert "Off" in message
+        assert "Arrise" in message
 
 
 def test_the_empty_message_falls_back_when_no_filter_dominates():

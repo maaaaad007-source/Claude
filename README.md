@@ -136,7 +136,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-193 tests cover query construction, redirect unwrapping (including Bing's
+195 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
@@ -294,13 +294,21 @@ provider did and where rows were dropped. The app distinguishes four outcomes:
 
 "None survived filtering" is four different failures with four different fixes,
 so the message names the one that dominated rather than shrugging. Most often
-it is the country: **Strict** keeps a result only on positive evidence — an
-`nl.linkedin.com` profile, the country named in the snippet, or one of its
-cities — and a great many LinkedIn headlines carry none of the three, so a
-company with real staff in a country can still return nothing. **Relaxed**
-keeps everything that is not positively somewhere else; **Off** keeps every
-market. When the drops are `locale xx.linkedin.com` in the diagnostics, those
-people really are in another country and relaxing will not bring them back.
+it is the country, and the diagnostics split that into two counters because
+they call for opposite advice:
+
+| Counter | What it means | Does Relaxed help? |
+| :--- | :--- | :--- |
+| **wrong-country** | The profile is served from another country's LinkedIn (`in.linkedin.com`) — proof the person is elsewhere | No. Only **Off** shows them |
+| **country unknown** | Nothing in the URL or snippet said where they are | Yes — Relaxed keeps everything not positively elsewhere |
+
+Strict mode requires positive evidence of the country: an `nl.linkedin.com`
+profile, the country named in the snippet, or one of its cities. A great many
+LinkedIn headlines carry none of the three, so a company with real staff in a
+country can still return nothing — those rows land in **country unknown**, and
+Relaxed brings them back. Rows in **wrong-country** are a different story: the
+people really are in another market, and no setting short of **Off** will
+produce them.
 
 Putting a **domain in the Company Name field** (`Spotify.com` rather than
 `Spotify`) breaks every query, since no LinkedIn headline contains that string.
