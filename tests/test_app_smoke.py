@@ -21,7 +21,9 @@ from executive_finder import pipeline  # noqa: E402
 from executive_finder.search import ProviderOutcome, SearchResult  # noqa: E402
 
 APP = str(pathlib.Path(__file__).resolve().parent.parent / "app.py")
-TIMEOUT = 60
+# Generous on purpose: a full app render took over 60s once under load on a
+# loaded machine, failing a test that was not actually broken.
+TIMEOUT = 180
 
 ROWS = [
     SearchResult(

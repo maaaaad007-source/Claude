@@ -136,7 +136,7 @@ truth is "we were refused."
 python -m pytest tests -q
 ```
 
-186 tests cover query construction, redirect unwrapping (including Bing's
+193 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
@@ -289,8 +289,18 @@ provider did and where rows were dropped. The app distinguishes four outcomes:
 | :--- | :--- |
 | Blocked by the search providers | Providers answered with a challenge page. Add an API key. |
 | Providers returned no results at all | The queries genuinely matched nothing. Broaden the company name or drop the country filter. |
-| Found N results, none survived filtering | Results came back but were company pages, listicles, or off-target roles. |
+| Found N results, none survived filtering | Results came back but every one was rejected. The message names which filter did it. |
 | Contacts found | Working normally. |
+
+"None survived filtering" is four different failures with four different fixes,
+so the message names the one that dominated rather than shrugging. Most often
+it is the country: **Strict** keeps a result only on positive evidence — an
+`nl.linkedin.com` profile, the country named in the snippet, or one of its
+cities — and a great many LinkedIn headlines carry none of the three, so a
+company with real staff in a country can still return nothing. **Relaxed**
+keeps everything that is not positively somewhere else; **Off** keeps every
+market. When the drops are `locale xx.linkedin.com` in the diagnostics, those
+people really are in another country and relaxing will not bring them back.
 
 Putting a **domain in the Company Name field** (`Spotify.com` rather than
 `Spotify`) breaks every query, since no LinkedIn headline contains that string.

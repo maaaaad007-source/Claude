@@ -21,7 +21,7 @@ from executive_finder import (
     normalise_domain,
 )
 from executive_finder.emails import DEFAULT_PATTERN
-from executive_finder.geo import SUPPORTED_COUNTRIES
+from executive_finder.geo import SUPPORTED_COUNTRIES, locale_hint
 from executive_finder.pipeline import find_contacts_detailed, split_company_input
 from executive_finder.search import api_key, configure_api_keys
 
@@ -347,6 +347,57 @@ SERPER_API_KEY = "your-key-here"
     )
 
 
+def _no_survivors_message(report, country: str, country_filter: str) -> str:
+    """Explain an empty result set by naming the filter that emptied it.
+
+    "None survived filtering" is true of four different failures with four
+    different fixes, so it leaves the user with nothing to do. Naming the
+    dominant drop turns the message into an instruction.
+    """
+    head = "Found {} results, but none survived filtering.".format(
+        report.raw_results
+    )
+    share = "{} of {}".format(report.dropped_wrong_country, report.raw_results)
+
+    if report.dominant_drop == "wrong_country":
+        if country_filter == "strict":
+            host = locale_hint(country)
+            evidence = "the country named, or one of its cities"
+            if host:
+                evidence = "a `{}` profile, {}".format(host, evidence)
+            return (
+                "{} The country filter removed {} — strict mode keeps a result "
+                "only when it carries evidence of **{}** ({}), and most "
+                "LinkedIn headlines carry none. Try **Relaxed**, which drops "
+                "only profiles hosted on another country's LinkedIn, or "
+                "**Off**.".format(head, share, country or "the country", evidence)
+            )
+        return (
+            "{} The country filter removed {} — those profiles are hosted on "
+            "another country's LinkedIn, so they are positively not in "
+            "**{}**. This company may have no leadership there. Set country "
+            "match to **Off** to see every market.".format(
+                head, share, country or "the country"
+            )
+        )
+
+    if report.dominant_drop == "off_target":
+        return (
+            "{} Most results were people at other companies or in other roles. "
+            "Add or edit roles in the sidebar, or turn off the stricter "
+            "company filter under **Advanced**.".format(head)
+        )
+
+    if report.dominant_drop == "unparsed_title":
+        return (
+            "{} The providers returned profiles whose headlines could not be "
+            "split into a name and a title. The raw headlines are "
+            "below.".format(head)
+        )
+
+    return head
+
+
 def _render_diagnostics(report, expanded: bool = False) -> None:
     """Show what each provider did and where the rows went."""
     with st.expander("Diagnostics", expanded=expanded):
@@ -588,11 +639,8 @@ def main() -> None:
                 )
             )
         else:
-            st.warning(
-                "Found {} results, but none survived filtering.".format(
-                    report.raw_results
-                )
-            )
+            st.warning(_no_survivors_message(
+                report, country.strip(), options["country_filter"]))
         _render_diagnostics(report, expanded=True)
         return
 

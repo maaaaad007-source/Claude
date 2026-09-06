@@ -228,3 +228,19 @@ def test_a_typed_country_outside_the_list_still_runs(monkeypatch):
         country_filter="strict", pause=0,
     )
     assert len(contacts) == 2
+
+
+def test_locale_hint_names_the_host_that_proves_a_country():
+    from executive_finder.geo import locale_hint
+
+    assert locale_hint("Netherlands") == "nl.linkedin.com"
+    assert locale_hint("United Kingdom") in ("uk.linkedin.com", "gb.linkedin.com")
+    assert locale_hint("Atlantis") == ""
+    assert locale_hint("") == ""
+
+
+def test_every_supported_country_has_a_locale_hint():
+    """The hint appears in user-facing advice; a blank one would read as a bug."""
+    from executive_finder.geo import SUPPORTED_COUNTRIES, locale_hint
+
+    assert all(locale_hint(name) for name in SUPPORTED_COUNTRIES)

@@ -438,3 +438,43 @@ def test_bing_redirect_decodes_whatever_marker_prefix_is_used():
         href = "https://www.bing.com/ck/a?!&&u={}{}&ntb=1".format(marker, payload)
         assert unwrap_redirect(href) == target, marker
         assert is_linkedin_profile(unwrap_redirect(href))
+
+
+def test_dominant_drop_names_the_filter_that_emptied_the_run():
+    report = SearchReport(raw_results=27, dropped_not_profile=10,
+                          dropped_wrong_country=17)
+    assert report.dominant_drop == "wrong_country"
+
+
+def test_dominant_drop_is_empty_when_nothing_was_dropped():
+    assert SearchReport(raw_results=3, kept=3).dominant_drop == ""
+
+
+def test_the_empty_message_tells_a_strict_country_run_what_to_change():
+    """A bare "none survived filtering" leaves the user with nothing to do."""
+    import app
+
+    report = SearchReport(raw_results=27, dropped_not_profile=10,
+                          dropped_wrong_country=17)
+    message = app._no_survivors_message(report, "Netherlands", "strict")
+    assert "17 of 27" in message
+    assert "nl.linkedin.com" in message
+    assert "Relaxed" in message
+
+
+def test_the_empty_message_does_not_offer_relaxed_when_already_relaxed():
+    import app
+
+    report = SearchReport(raw_results=27, dropped_wrong_country=27)
+    message = app._no_survivors_message(report, "Netherlands", "relaxed")
+    assert "Relaxed" not in message
+    assert "Off" in message
+
+
+def test_the_empty_message_falls_back_when_no_filter_dominates():
+    import app
+
+    report = SearchReport(raw_results=4)
+    assert app._no_survivors_message(report, "", "strict") == (
+        "Found 4 results, but none survived filtering."
+    )

@@ -129,6 +129,26 @@ class SearchReport:
     def usable_provider(self) -> bool:
         return any(o.status == "ok" for o in self.outcomes)
 
+    @property
+    def dominant_drop(self) -> str:
+        """Which filter discarded the most rows, or '' when nothing was dropped.
+
+        An empty result set is not one problem but four, and each has its own
+        remedy: a country filter with no evidence to work on, a role sweep that
+        found the wrong people, providers padding the page with non-profiles, or
+        headlines we could not parse.  Telling the user which one it was is the
+        difference between an actionable message and a shrug.
+        """
+        counts = {
+            "wrong_country": self.dropped_wrong_country,
+            "off_target": self.dropped_off_target,
+            "not_profile": self.dropped_not_profile,
+            "unparsed_title": self.dropped_unparsed_title,
+            "duplicate": self.dropped_duplicate,
+        }
+        reason, count = max(counts.items(), key=lambda item: item[1])
+        return reason if count else ""
+
     def summary(self) -> str:
         return (
             "{raw} raw results — dropped {np} non-profile, {ut} unparseable, "

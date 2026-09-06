@@ -20,6 +20,7 @@ __all__ = [
     "CountryVerdict",
     "country_match",
     "known_country",
+    "locale_hint",
     "locale_of",
 ]
 
@@ -190,6 +191,20 @@ def _canonical(country: str) -> str:
 def known_country(country: str) -> bool:
     """True when the country is one this module can positively verify."""
     return bool(_canonical(country))
+
+
+def locale_hint(country: str) -> str:
+    """The LinkedIn host that proves a profile is in ``country``, for the UI.
+
+    Returns e.g. ``nl.linkedin.com`` for the Netherlands, or '' for a country
+    the filter does not recognise.  Where a country has several accepted
+    locales the shortest is used — it is illustrative, not exhaustive.
+    """
+    canonical = _canonical(country)
+    if not canonical:
+        return ""
+    accepted = sorted(_LOCALES[canonical] - {"www"}) or sorted(_LOCALES[canonical])
+    return "{}.linkedin.com".format(min(accepted, key=len))
 
 
 def locale_of(url: str) -> str:
