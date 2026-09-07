@@ -291,3 +291,86 @@ def test_every_provider_asks_for_more_than_a_single_page():
     assert SERPER_RESULTS == 100          # Serper's documented maximum
     assert BRAVE_RESULTS == 20            # Brave's documented maximum
     assert int(BING_RESULTS) >= 50
+
+
+# --------------------------------------------------------------------------- #
+# Serper request-body resilience
+# --------------------------------------------------------------------------- #
+class _Resp:
+    def __init__(self, status=200, organic=()):
+        self.status_code = status
+        self.ok = status < 400
+        self.text = "" if self.ok else "Bad Request"
+        self._organic = list(organic)
+
+    def json(self):
+        return {"organic": self._organic}
+
+
+class _Session:
+    """Records every body sent, and answers per a caller-supplied rule."""
+
+    def __init__(self, rule):
+        self.sent = []
+        self._rule = rule
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.sent.append(json)
+        return self._rule(json)
+
+
+ROW = {"title": "Jim Rowan - CEO - Volvo | LinkedIn",
+       "link": "https://se.linkedin.com/in/jim-rowan", "snippet": "Volvo"}
+
+
+def test_serper_retries_with_the_minimal_body_when_tuning_is_rejected(monkeypatch):
+    """A rejected parameter must not cost us the only working provider.
+
+    On a hosted deployment the scraped providers are blocked, so a Serper that
+    always 400s leaves nothing at all — which is strictly worse than the ten
+    results the minimal body returns.
+    """
+    from executive_finder import search as search_mod
+
+    monkeypatch.setattr(search_mod, "api_key", lambda name: "key")
+    search_mod.configure_region("Sweden")
+    search_mod.reset_serper_reduced()
+
+    session = _Session(lambda body: _Resp(200, [ROW]) if list(body) == ["q"]
+                       else _Resp(400))
+    results = search_mod._fetch_serper(session, "q", 5.0)
+
+    assert [r.url for r in results] == ["https://se.linkedin.com/in/jim-rowan"]
+    assert list(session.sent[0]) == ["q", "num", "gl"]      # tuned first
+    assert list(session.sent[1]) == ["q"]                   # then minimal
+    assert search_mod.serper_reduced()
+    search_mod.configure_region("")
+
+
+def test_serper_does_not_retry_when_the_tuned_body_works(monkeypatch):
+    from executive_finder import search as search_mod
+
+    monkeypatch.setattr(search_mod, "api_key", lambda name: "key")
+    search_mod.configure_region("")
+    search_mod.reset_serper_reduced()
+
+    session = _Session(lambda body: _Resp(200, [ROW]))
+    search_mod._fetch_serper(session, "q", 5.0)
+
+    assert len(session.sent) == 1
+    assert not search_mod.serper_reduced()
+
+
+def test_a_serper_auth_failure_is_not_retried_or_swallowed(monkeypatch):
+    """401/403 means the key is wrong; retrying hides that behind a wrong story."""
+    from executive_finder import search as search_mod
+    from executive_finder.search import SearchError
+
+    monkeypatch.setattr(search_mod, "api_key", lambda name: "key")
+    search_mod.configure_region("")
+    search_mod.reset_serper_reduced()
+
+    session = _Session(lambda body: _Resp(403))
+    with pytest.raises(SearchError):
+        search_mod._fetch_serper(session, "q", 5.0)
+    assert len(session.sent) == 1

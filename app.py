@@ -23,7 +23,12 @@ from executive_finder import (
 from executive_finder.emails import DEFAULT_PATTERN
 from executive_finder.geo import SUPPORTED_COUNTRIES, locale_hint
 from executive_finder.pipeline import find_contacts_detailed, split_company_input
-from executive_finder.search import api_key, configure_api_keys
+from executive_finder.search import (
+    api_key,
+    configure_api_keys,
+    reset_serper_reduced,
+    serper_reduced,
+)
 
 # The role sweep always runs at full depth; there is no reason to make the
 # user choose a smaller number, and a partial sweep only hides contacts.
@@ -269,6 +274,9 @@ def _resolve_api_keys() -> str:
         brave=_configured_key("BRAVE_API_KEY"),
         replace=True,
     )
+    # Per run, so a downgrade reported in diagnostics belongs to this run and
+    # not to a stale one from an hour ago.
+    reset_serper_reduced()
 
     if typed:
         return "session" if not deployment else "session override"
@@ -428,6 +436,15 @@ def _render_diagnostics(report, expanded: bool = False) -> None:
             st.caption("**Email lookup:** " + report.enrichment_note)
         if report.pattern_note:
             st.caption("**Pattern discovery:** " + report.pattern_note)
+        if serper_reduced():
+            # Otherwise this is invisible: the app quietly gets 10 results a
+            # query instead of 100, and every downstream count looks thin for
+            # no apparent reason.
+            st.caption(
+                "**Serper:** rejected the tuned request (result count / "
+                "region), so the minimal query was used — about 10 results "
+                "per search instead of 100."
+            )
 
         if report.outcomes:
             st.dataframe(

@@ -500,6 +500,21 @@ def region_code() -> str:
     return _REGION.get("gl", "")
 
 
+# Set when Serper rejected our tuned request body and the minimal one worked.
+# Surfaced in diagnostics: it is the difference between "this deployment gets
+# 100 results a query" and "it gets 10", and nothing else would reveal it.
+_SERPER_REDUCED: set = set()
+
+
+def serper_reduced() -> bool:
+    """True when Serper refused the tuned body and we fell back to `q` alone."""
+    return bool(_SERPER_REDUCED)
+
+
+def reset_serper_reduced() -> None:
+    _SERPER_REDUCED.clear()
+
+
 def _raise_for_api_status(response, provider: str) -> None:
     """Raise with the API's own error body, which explains far more than a code."""
     if response.ok:
@@ -521,12 +536,26 @@ def _fetch_serper(session: requests.Session, query: str, timeout: float) -> List
     body = {"q": query, "num": SERPER_RESULTS}
     if region_code():
         body["gl"] = region_code()
-    response = session.post(
-        SERPER_ENDPOINT,
-        json=body,
-        headers={"X-API-KEY": key, "Content-Type": "application/json"},
-        timeout=timeout,
-    )
+
+    headers = {"X-API-KEY": key, "Content-Type": "application/json"}
+
+    def post(payload):
+        return session.post(SERPER_ENDPOINT, json=payload, headers=headers,
+                            timeout=timeout)
+
+    response = post(body)
+
+    # Extra parameters are the usual cause of a 400 here, and a rejected body
+    # is far worse than a small one: on a hosted deployment the scraped
+    # providers are blocked, so a Serper that always errors leaves nothing at
+    # all. Anything we add beyond "q" is therefore an optimisation that must
+    # be able to fail — retry once with the minimal documented body, and say
+    # so, rather than losing the only working provider to a tuning parameter.
+    if response.status_code == 400 and len(body) > 1:
+        response = post({"q": query})
+        if response.ok:
+            _SERPER_REDUCED.add("reduced")
+
     _raise_for_api_status(response, "serper")
     payload = response.json()
     return [

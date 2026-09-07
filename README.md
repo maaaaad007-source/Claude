@@ -16,6 +16,64 @@ streamlit run app.py
 
 The app opens on <http://localhost:8501>.
 
+## Running locally, without any third-party API
+
+**This is usually the best-performing way to run the app, and it needs no API
+key, no account and no credits.**
+
+The app has always had two classes of provider: keyed APIs (Serper, Brave) and
+scraped search front-ends (DuckDuckGo, Bing, Mojeek). The scraped ones are free
+and unmetered — they are only unreliable *on a hosted deployment*, because
+Streamlit Community Cloud runs on shared datacenter addresses that search
+engines answer with a bot challenge. From a home or office connection they
+generally answer normally.
+
+So running it on your own machine removes the dependency entirely:
+
+```bash
+git clone https://github.com/maaaaad007-source/Claude.git
+cd Claude
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Leave the API-key box empty. The keyed providers are skipped and the scraped
+ones do the work.
+
+### Check what actually works from your machine first
+
+A challenge page arrives as a perfectly ordinary HTTP 200, so nothing in the
+app can tell you in advance which situation you are in. This runs one real
+query against every provider and prints what came back:
+
+```bash
+python scripts/check_providers.py
+python scripts/check_providers.py --company Volvo --country Sweden
+```
+
+```
+PROVIDER          STATUS     ROWS  PROFILES  DETAIL
+duckduckgo        OK           28        24  Jim Rowan - CEO - Volvo Cars | LinkedIn
+bing              OK           31        27  Jim Rowan - Chief Executive Officer …
+mojeek            empty         0         0  responded normally with no results
+```
+
+`OK` means that provider works from here and the app will too. `BLOCKED` means
+this address is being challenged — the usual result from a datacenter, and the
+reason the hosted version needs a key. Exit status is 0 when at least one
+provider answers, so it also works as a check in a script.
+
+### Which to use
+
+| | Hosted (Streamlit Cloud) | Local |
+| :--- | :--- | :--- |
+| Scraped providers | Usually blocked | Usually work |
+| API key | Effectively required | Not needed |
+| Cost / quota | Serper's free tier, per query | None |
+| Shareable link | Yes | No — it runs on your machine |
+
+Keys still work locally if you have them, and are tried first.
+
 ## Using it
 
 The top control panel takes three inputs:
@@ -91,6 +149,7 @@ executive_finder/
 ├── geo.py                    Country matching (locale, country and city evidence)
 └── pipeline.py               Orchestration, filtering, de-duplication
 tests/                        Unit tests (pytest)
+scripts/check_providers.py    Which providers answer from this machine
 ```
 
 ### Search & parsing pipeline
@@ -159,6 +218,14 @@ routinely came back empty. A Serper call costs one credit whether it returns
 ten rows or a hundred, so the small ask bought nothing. The app now requests
 Serper's maximum of 100, Brave's of 20, and 50 from Bing.
 
+Anything beyond `q` in the Serper body is an optimisation that has to be able
+to fail. Extra parameters are the usual cause of a 400, and on a hosted
+deployment — where the scraped providers are blocked — a Serper that always
+errors leaves nothing at all, which is far worse than the ten results the
+minimal body returns. So a 400 is retried once with `{"q": …}` alone, and the
+downgrade is reported in the diagnostics rather than silently halving the
+result count.
+
 A provider answering HTTP 200 with a bot-challenge page is recorded as
 **blocked**, not **empty**. Without that distinction a block is indistinguishable
 from a genuine zero-result search, and the UI reports "nothing matched" when the
@@ -181,7 +248,7 @@ ignored.
 python -m pytest tests -q
 ```
 
-218 tests cover query construction, redirect unwrapping (including Bing's
+221 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
