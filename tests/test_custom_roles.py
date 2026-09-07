@@ -87,8 +87,12 @@ def test_a_typed_role_is_searched_as_itself(monkeypatch):
         categories=["Head of Marketing"], pause=0,
     )
     # The country lives in the host, not in the terms: scoping the site is a
-    # hard constraint where a quoted country name is only a ranking hint.
-    assert queries == ['site:se.linkedin.com/in/ "Spotify" "Head of Marketing"']
+    # hard constraint where a quoted country name is only a ranking hint. The
+    # global host is then searched too, to top up the partial locale corpus.
+    assert queries == [
+        'site:se.linkedin.com/in/ "Spotify" "Head of Marketing"',
+        'site:linkedin.com/in/ "Spotify" "Head of Marketing" "Sweden"',
+    ]
     # The CTO row still survives because the snippet names the company.
     assert contacts and contacts[0].full_name == "Gustav Söderström"
 

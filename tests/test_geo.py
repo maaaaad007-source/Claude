@@ -117,7 +117,18 @@ def no_sleep(monkeypatch):
 
 
 def _stub(monkeypatch, rows):
+    """Answer the first X-Ray query with ``rows``, later ones empty.
+
+    With a country set each category is searched twice (its LinkedIn locale,
+    then the global host to top up); handing both calls the same rows would
+    double every drop counter here without testing anything.
+    """
+    calls = []
+
     def fake(query, session=None, timeout=15.0, pause=1.0):
+        calls.append(query)
+        if len(calls) > 1:
+            return [], [ProviderOutcome("stub", "empty")]
         return rows, [ProviderOutcome("stub", "ok", rows=len(rows))]
     monkeypatch.setattr(pipeline, "search_detailed", fake)
 
@@ -287,9 +298,10 @@ def test_the_country_search_asks_that_countrys_linkedin_first(monkeypatch):
         "Volvo", country="Netherlands", categories=["CEO / Executive"],
         country_filter="strict", pause=0,
     )
-    assert seen == ['site:nl.linkedin.com/in/ "Volvo" ("CEO" OR '
-                    '"Chief Executive Officer" OR "Managing Director" OR '
-                    '"President" OR "Country Head")']
+    assert seen[0] == ('site:nl.linkedin.com/in/ "Volvo" ("CEO" OR '
+                       '"Chief Executive Officer" OR "Managing Director" OR '
+                       '"President" OR "Country Head")')
+    # The same person came back from both queries; de-duplication keeps one.
     assert [c.full_name for c in contacts] == ["Jan de Vries"]
 
 
@@ -309,13 +321,29 @@ def test_an_empty_locale_corpus_falls_back_to_the_global_host(monkeypatch):
     assert [c.full_name for c in contacts] == ["Jan de Vries"]
 
 
-def test_no_fallback_is_spent_when_the_scoped_query_delivered(monkeypatch):
-    """The fallback doubles the request count; it must stay a fallback."""
+def test_the_global_query_tops_up_a_thin_locale_result(monkeypatch):
+    """The locale corpus is partial, so a few hits from it are not enough."""
+    other = SearchResult(
+        "Sanne Bakker - Managing Director - Volvo | LinkedIn",
+        "https://nl.linkedin.com/in/sanne-bakker", "Volvo · Rotterdam")
+    seen = _recording_stub(
+        monkeypatch, lambda q: [DUTCH] if "nl.linkedin.com" in q else [other])
+
+    contacts, _ = pipeline.find_contacts_detailed(
+        "Volvo", country="Netherlands", categories=["CEO / Executive"],
+        country_filter="strict", pause=0,
+    )
+    assert len(seen) == 2
+    assert sorted(c.full_name for c in contacts) == ["Jan de Vries", "Sanne Bakker"]
+
+
+def test_no_second_query_is_spent_once_the_quota_is_full(monkeypatch):
+    """Topping up is worth a request; searching past the cap is not."""
     seen = _recording_stub(monkeypatch, lambda q: [DUTCH])
 
     pipeline.find_contacts_detailed(
         "Volvo", country="Netherlands", categories=["CEO / Executive"],
-        country_filter="strict", pause=0,
+        country_filter="strict", pause=0, max_per_category=1,
     )
     assert len(seen) == 1
 

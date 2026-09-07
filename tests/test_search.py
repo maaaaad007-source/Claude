@@ -165,6 +165,7 @@ def test_the_region_bias_is_set_and_cleared():
 
 def test_serper_sends_the_region_and_omits_it_when_unset(monkeypatch):
     from executive_finder import search as search_mod
+    from executive_finder.search import SERPER_RESULTS
 
     sent = []
 
@@ -188,8 +189,8 @@ def test_serper_sends_the_region_and_omits_it_when_unset(monkeypatch):
     search_mod.configure_region("")
     search_mod._fetch_serper(FakeSession(), "q", 5.0)
 
-    assert sent[0] == {"q": "q", "gl": "nl"}
-    assert sent[1] == {"q": "q"}
+    assert sent[0] == {"q": "q", "num": SERPER_RESULTS, "gl": "nl"}
+    assert sent[1] == {"q": "q", "num": SERPER_RESULTS}
 
 
 # --------------------------------------------------------------------------- #
@@ -273,3 +274,20 @@ def test_a_non_profile_query_is_never_judged_on_linkedin_urls(monkeypatch):
 
     assert results == JUNK
     assert outcomes[0].status == "ok"
+
+
+def test_every_provider_asks_for_more_than_a_single_page():
+    """Serper defaults to ten results, and ten was the app's real ceiling.
+
+    Five roles at ten rows each gave fifty candidates for a whole search,
+    from which the profile, role and country filters each took a cut — so a
+    company with real staff in a country routinely came back empty. A Serper
+    call costs one credit whatever num is, so a small ask is pure loss.
+    """
+    from executive_finder.search import (
+        BING_RESULTS, BRAVE_RESULTS, SERPER_RESULTS,
+    )
+
+    assert SERPER_RESULTS == 100          # Serper's documented maximum
+    assert BRAVE_RESULTS == 20            # Brave's documented maximum
+    assert int(BING_RESULTS) >= 50

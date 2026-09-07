@@ -24,10 +24,19 @@ UNRELATED = SearchResult(
 
 
 def _stub_search(results_by_call):
+    """Answer the first X-Ray query with ``results_by_call``, later ones empty.
+
+    A category is searched twice when a country is set — the country's own
+    LinkedIn locale, then the global host to top up. Handing both the same rows
+    would double every drop counter in these tests for no reason; a real second
+    query returns what the first did not.
+    """
     calls = {"queries": []}
 
     def fake_search(query, session=None, timeout=15.0, pause=1.0):
         calls["queries"].append(query)
+        if len(calls["queries"]) > 1:
+            return [], [ProviderOutcome("stub", "empty")]
         outcome = ProviderOutcome("stub", "ok", rows=len(results_by_call))
         return results_by_call, [outcome]
 
@@ -62,7 +71,10 @@ def test_find_contacts_builds_the_six_column_matrix(monkeypatch):
 
     # Company pages and off-target roles are filtered out.
     assert all(row["Full Name"] != "Erik Larsson" for row in rows)
-    assert len(calls["queries"]) == 1
+    # One category, one country: its LinkedIn locale, then the global host.
+    assert len(calls["queries"]) == 2
+    assert calls["queries"][0].startswith("site:se.linkedin.com/in/")
+    assert calls["queries"][1].startswith("site:linkedin.com/in/")
 
 
 def test_designation_is_classified_independently_of_the_query_category(monkeypatch):

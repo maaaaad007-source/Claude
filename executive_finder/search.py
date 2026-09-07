@@ -76,6 +76,12 @@ MOJEEK_ENDPOINT = "https://www.mojeek.com/search"
 SERPER_ENDPOINT = "https://google.serper.dev/search"
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
+# Results to request per query. One Serper call costs one credit whether it
+# returns ten rows or a hundred, so asking small is pure loss.
+SERPER_RESULTS = 100
+BRAVE_RESULTS = 20          # Brave's documented maximum
+BING_RESULTS = "50"
+
 _PROFILE_PATH = re.compile(r"^/in/[^/]+", re.IGNORECASE)
 _LINKEDIN_HOST = re.compile(r"(?:^|\.)linkedin\.com$", re.IGNORECASE)
 
@@ -356,7 +362,7 @@ def _fetch_duckduckgo(session: requests.Session, query: str, timeout: float) -> 
 def _fetch_bing(session: requests.Session, query: str, timeout: float) -> str:
     response = session.get(
         BING_ENDPOINT,
-        params={"q": query, "count": "30", "setlang": "en"},
+        params={"q": query, "count": BING_RESULTS, "setlang": "en"},
         headers={**_headers(), "Referer": "https://www.bing.com/"},
         timeout=timeout,
     )
@@ -508,8 +514,11 @@ def _fetch_serper(session: requests.Session, query: str, timeout: float) -> List
     key = api_key("serper")
     if not key:
         raise SearchError("no Serper API key configured")
-    # Minimal documented body — extra parameters are the usual cause of a 400.
-    body = {"q": query}
+    # Serper returns ten results when num is omitted, and ten was the ceiling
+    # on the whole app: five roles gave fifty candidates for an entire search,
+    # from which the profile, role and country filters each took their cut.
+    # Asking for the documented maximum costs the same one credit per call.
+    body = {"q": query, "num": SERPER_RESULTS}
     if region_code():
         body["gl"] = region_code()
     response = session.post(
@@ -534,7 +543,7 @@ def _fetch_brave(session: requests.Session, query: str, timeout: float) -> List[
     key = api_key("brave")
     if not key:
         raise SearchError("no Brave API key configured")
-    params = {"q": query, "count": 20}
+    params = {"q": query, "count": BRAVE_RESULTS}
     if region_code():
         params["country"] = region_code().upper()
     response = session.get(

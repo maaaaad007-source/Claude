@@ -131,11 +131,13 @@ tests/                        Unit tests (pytest)
    the host has said it, and demanding the literal word as well would discard
    every profile whose headline omits it.
 
-   Not every profile is indexed under its country's host, so an empty locale
-   corpus falls back to the global one with the country as a term. The
-   fallback costs a second request per role and only fires when the scoped
-   query found nothing usable. When a key is configured, Serper and Brave are
-   also asked for that country's index (`gl` / `country`).
+   The locale corpus is precise but partial — LinkedIn does not serve every
+   member's profile from their country's subdomain, and engines index only
+   some of what it does. So the global host is searched too, with the country
+   as a term, unless the scoped query already filled the category's quota.
+   De-duplication means an overlap costs nothing but a request. When a key is
+   configured, Serper and Brave are also asked for that country's index
+   (`gl` / `country`).
 
 5. **Country filtering** — scoping raises precision but does not guarantee it,
    and the fallback path is unscoped by definition, so a positive check still
@@ -148,6 +150,14 @@ tests/                        Unit tests (pytest)
 Providers are tried in order — Serper and Brave first when an API key is
 configured, then the scraped front-ends (DuckDuckGo HTML, DuckDuckGo Lite, Bing,
 Mojeek) — and the first one returning usable rows wins.
+
+**Every provider is asked for a full page.** Serper returns ten results when
+`num` is omitted, and ten was the ceiling on the entire app: five roles gave
+fifty candidates for a whole search, from which the profile, role and country
+filters each took their cut — so a company with real staff in a region
+routinely came back empty. A Serper call costs one credit whether it returns
+ten rows or a hundred, so the small ask bought nothing. The app now requests
+Serper's maximum of 100, Brave's of 20, and 50 from Bing.
 
 A provider answering HTTP 200 with a bot-challenge page is recorded as
 **blocked**, not **empty**. Without that distinction a block is indistinguishable
@@ -171,7 +181,7 @@ ignored.
 python -m pytest tests -q
 ```
 
-216 tests cover query construction, redirect unwrapping (including Bing's
+218 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the

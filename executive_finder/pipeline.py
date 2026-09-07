@@ -528,12 +528,15 @@ def find_contacts_detailed(
         # constraint where a quoted country name is only a hint, so this is
         # what stops a sweep coming back full of the wrong market.
         if country_mode != "off":
-            found = run(build_query(company, roles.keywords_for(category),
-                                    country, country_scoped=True))
-            # Not every profile of a person in a country is indexed under that
-            # country's host, so an empty locale corpus must not end the search
-            # — fall back to the global one and let the filter judge the rows.
-            if not found:
+            run(build_query(company, roles.keywords_for(category),
+                            country, country_scoped=True))
+            # The locale corpus is precise but partial: LinkedIn does not serve
+            # every member's profile from their country's subdomain, and search
+            # engines index only some of what it does. So the global query runs
+            # too unless the scoped one already filled this category's quota —
+            # the country filter judges its rows, and de-duplication means an
+            # overlap costs nothing but a request.
+            if len(contacts) - before < max_per_category:
                 if pause:
                     time.sleep(min(pause, 1.0))
                 run(build_query(company, roles.keywords_for(category), country))
