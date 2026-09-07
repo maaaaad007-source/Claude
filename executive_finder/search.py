@@ -596,6 +596,26 @@ class ProviderOutcome:
         return base + (" — " + self.detail if self.detail else "")
 
 
+def _is_profile_query(query: str) -> bool:
+    """True when ``query`` asks for LinkedIn profiles and nothing else."""
+    return query.startswith("site:") and "linkedin.com/in/" in query
+
+
+def _ignores_site_filter(query: str, results: Sequence[SearchResult]) -> bool:
+    """True when a provider answered a ``site:`` query with none of that site.
+
+    Search engines do not report "no matches" for a ``site:`` query; several
+    quietly drop the operator and pad the page with whatever they have, so a
+    query for LinkedIn profiles at an obscure company comes back as court
+    records and people-finder sites.  Rows like that are not results, and
+    accepting them ends the provider chain on garbage while burying the real
+    answer — that nothing matched — under a pile of drops.
+    """
+    if not results or not _is_profile_query(query):
+        return False
+    return not any(is_linkedin_profile(r.url) for r in results)
+
+
 def search_detailed(
     query: str,
     session: Optional[requests.Session] = None,
@@ -606,7 +626,9 @@ def search_detailed(
 
     Providers are tried in order until one returns usable rows.  A provider
     answering 200 with a challenge page is recorded as ``blocked`` rather than
-    ``empty``, so "we were refused" is never reported as "nothing matched".
+    ``empty``, so "we were refused" is never reported as "nothing matched", and
+    one that ignored the ``site:`` filter is recorded as ``ignored`` rather than
+    being allowed to win the chain with off-site padding.
     """
     session = session or requests.Session()
     outcomes: List[ProviderOutcome] = []
@@ -645,6 +667,17 @@ def search_detailed(
             )
             continue
 
+        if _ignores_site_filter(query, results):
+            outcomes.append(
+                ProviderOutcome(
+                    provider.name,
+                    "ignored",
+                    detail="returned {} results, none on linkedin.com — the "
+                           "site: filter was dropped".format(len(results)),
+                )
+            )
+            continue
+
         if results:
             outcomes.append(ProviderOutcome(provider.name, "ok", rows=len(results)))
             return results, outcomes
@@ -655,7 +688,10 @@ def search_detailed(
             )
         )
 
-    if not any(o.status in ("ok", "empty") for o in outcomes):
+    # "ignored" counts as an answer: the provider responded normally, it simply
+    # had nothing on the site we asked about. Treating it as a failure would
+    # report a genuine zero-result search as "every provider refused us".
+    if not any(o.status in ("ok", "empty", "ignored") for o in outcomes):
         error = SearchError(
             "no search provider returned results -> "
             + "; ".join(str(o) for o in outcomes)

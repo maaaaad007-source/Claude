@@ -154,13 +154,24 @@ A provider answering HTTP 200 with a bot-challenge page is recorded as
 from a genuine zero-result search, and the UI reports "nothing matched" when the
 truth is "we were refused."
 
+A provider answering a `site:linkedin.com/in/` query with rows that are *not*
+on LinkedIn is recorded as **ignored**, and the chain moves on to the next
+provider. Search engines do not return "no matches" for a `site:` query —
+several quietly drop the operator and pad the page with whatever they have, so
+a search for an obscure company comes back as court records and people-finder
+sites. Accepting those rows ends the provider chain on garbage and buries the
+real answer under a pile of drops: one such run reported *82 results, 71
+non-profile* where the honest answer was *nothing matched*. A page with even
+one real profile on it is still accepted — only an entirely off-site page is
+ignored.
+
 ## Tests
 
 ```bash
 python -m pytest tests -q
 ```
 
-209 tests cover query construction, redirect unwrapping (including Bing's
+216 tests cover query construction, redirect unwrapping (including Bing's
 base64 `/ck/a` wrapper), SERP parsing, block detection, title unpackaging, name
 sanitisation, email patterns, Hunter enrichment, country matching, role
 classification, free pattern inference and the end-to-end pipeline (with the
@@ -314,6 +325,7 @@ provider did and where rows were dropped. The app distinguishes four outcomes:
 | Blocked by the search providers | Providers answered with a challenge page. Add an API key. |
 | Providers returned no results at all | The queries genuinely matched nothing. Broaden the company name or drop the country filter. |
 | Found N results, none survived filtering | Results came back but every one was rejected. The message names which filter did it. |
+| No LinkedIn profiles matched | Providers answered a `site:` query with unrelated pages — how an engine says "no matches". The company likely has no indexed presence there. |
 | Contacts found | Working normally. |
 
 "None survived filtering" is four different failures with four different fixes,

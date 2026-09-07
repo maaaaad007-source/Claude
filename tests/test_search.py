@@ -2,6 +2,7 @@ import pytest
 
 from executive_finder.roles import ROLE_MATRIX
 from executive_finder.search import (
+    SearchResult,
     build_query,
     canonical_linkedin_url,
     is_linkedin_profile,
@@ -189,3 +190,86 @@ def test_serper_sends_the_region_and_omits_it_when_unset(monkeypatch):
 
     assert sent[0] == {"q": "q", "gl": "nl"}
     assert sent[1] == {"q": "q"}
+
+
+# --------------------------------------------------------------------------- #
+# Providers that silently drop the site: filter
+# --------------------------------------------------------------------------- #
+JUNK = [
+    SearchResult("Court Case Finder", "https://courtcasefinder.com/", ""),
+    SearchResult("UniCourt", "https://unicourt.com/courts/federal", ""),
+    SearchResult("RecordsFinder", "https://recordsfinder.com/court/", ""),
+]
+PROFILE = SearchResult(
+    "Jim Rowan - CEO - Volvo | LinkedIn",
+    "https://se.linkedin.com/in/jim-rowan", "Volvo")
+
+XRAY = 'site:se.linkedin.com/in/ "Volvo" "CEO"'
+
+
+def _providers(monkeypatch, *responses):
+    """Install one fake provider per response, in order."""
+    from executive_finder import search as search_mod
+
+    made = []
+    for index, rows in enumerate(responses):
+        def fetch(session, query, timeout, rows=rows):
+            return list(rows)
+        made.append(search_mod.Provider("p{}".format(index), fetch, None))
+    monkeypatch.setattr(search_mod, "PROVIDERS", tuple(made))
+
+
+def test_off_site_padding_does_not_win_the_provider_chain(monkeypatch):
+    """Junk from one provider must not stop us asking the next."""
+    from executive_finder.search import search_detailed
+
+    _providers(monkeypatch, JUNK, [PROFILE])
+    results, outcomes = search_detailed(XRAY, pause=0)
+
+    assert results == [PROFILE]
+    assert [(o.name, o.status) for o in outcomes] == [("p0", "ignored"), ("p1", "ok")]
+
+
+def test_off_site_padding_is_reported_as_ignored_not_empty(monkeypatch):
+    """'Ignored' and 'empty' look identical in the counts but are not."""
+    from executive_finder.search import search_detailed
+
+    _providers(monkeypatch, JUNK)
+    results, outcomes = search_detailed(XRAY, pause=0)
+
+    assert results == []
+    assert outcomes[0].status == "ignored"
+    assert "none on linkedin.com" in outcomes[0].detail
+
+
+def test_a_provider_ignoring_the_filter_is_not_reported_as_a_refusal(monkeypatch):
+    """Every provider padding means nothing matched, not that we were blocked."""
+    from executive_finder.search import search_detailed
+
+    _providers(monkeypatch, JUNK, JUNK)
+    results, outcomes = search_detailed(XRAY, pause=0)  # must not raise
+
+    assert results == []
+    assert all(o.status == "ignored" for o in outcomes)
+
+
+def test_a_partial_page_of_profiles_is_still_accepted(monkeypatch):
+    """One real profile among padding is a result; only all-junk is ignored."""
+    from executive_finder.search import search_detailed
+
+    _providers(monkeypatch, JUNK + [PROFILE])
+    results, outcomes = search_detailed(XRAY, pause=0)
+
+    assert PROFILE in results
+    assert outcomes[0].status == "ok"
+
+
+def test_a_non_profile_query_is_never_judged_on_linkedin_urls(monkeypatch):
+    """Pattern discovery searches for "@domain" and must keep off-site rows."""
+    from executive_finder.search import search_detailed
+
+    _providers(monkeypatch, JUNK)
+    results, outcomes = search_detailed('"@volvocars.com"', pause=0)
+
+    assert results == JUNK
+    assert outcomes[0].status == "ok"

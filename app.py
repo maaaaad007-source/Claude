@@ -398,6 +398,18 @@ def _no_survivors_message(report, country: str, country_filter: str,
             "company filter under **Advanced**.".format(head)
         )
 
+    if report.dominant_drop == "not_profile":
+        return (
+            "{} Most of what came back was not on LinkedIn at all — the search "
+            "providers dropped the `site:` filter and padded the page with "
+            "unrelated pages, which is what they do when a query genuinely "
+            "matches nothing. **{}** may have no public LinkedIn presence{}. "
+            "The URLs are below.".format(
+                head, company or "This company",
+                " in " + country if country else "",
+            )
+        )
+
     if report.dominant_drop == "unparsed_title":
         return (
             "{} The providers returned profiles whose headlines could not be "
@@ -637,8 +649,26 @@ def main() -> None:
                      "bot challenge rather than results.")
             _render_api_key_help()
         elif not report.raw_results:
-            st.warning("No results for these queries. Try a broader company "
-                       "name or drop the country.")
+            ignored = sum(1 for o in report.outcomes if o.status == "ignored")
+            if ignored:
+                # Not the same as silence: they answered, with a page of
+                # unrelated sites, which is how an engine says "no matches"
+                # for a site: query.
+                st.warning(
+                    "No LinkedIn profiles matched. {} provider {} answered "
+                    "with unrelated pages instead of results, which is what "
+                    "search engines do when a `site:` query genuinely matches "
+                    "nothing. **{}** may have no public LinkedIn presence{}. "
+                    "Try a broader company name or drop the country.".format(
+                        ignored,
+                        "response" if ignored == 1 else "responses",
+                        resolved_company,
+                        " in " + country.strip() if country.strip() else "",
+                    )
+                )
+            else:
+                st.warning("No results for these queries. Try a broader company "
+                           "name or drop the country.")
         elif report.dropped_not_profile == report.raw_results:
             st.warning(
                 "Found {0} results, but none were LinkedIn profiles. That "

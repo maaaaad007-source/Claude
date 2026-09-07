@@ -520,3 +520,24 @@ def test_the_empty_message_falls_back_when_no_filter_dominates():
     assert app._no_survivors_message(report, "", "strict") == (
         "Found 4 results, but none survived filtering."
     )
+
+
+def test_the_empty_message_explains_a_page_full_of_off_site_padding():
+    """The BJAK case: 71 of 82 rows were court records, not LinkedIn."""
+    import app
+
+    report = SearchReport(raw_results=82, dropped_not_profile=71,
+                          dropped_wrong_country=11)
+    message = app._no_survivors_message(report, "Sweden", "strict", "BJAK")
+    assert "BJAK" in message
+    assert "in Sweden" in message
+    assert "site:" in message
+
+
+def test_the_off_site_message_reads_correctly_without_a_country():
+    import app
+
+    report = SearchReport(raw_results=82, dropped_not_profile=71)
+    message = app._no_survivors_message(report, "", "strict", "BJAK")
+    assert "presence." in message
+    assert "in ." not in message
