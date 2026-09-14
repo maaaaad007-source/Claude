@@ -5,8 +5,8 @@ exercised against the dependency versions resolved on that date — useful for a
 project whose failures arrive from upstream releases rather than from commits
 here.
 
-- **Last verified:** 2026-09-07
-- **Test suite:** passing — 209 passed
+- **Last verified:** 2026-09-14
+- **Test suite:** passing — 221 passed
 - **Python:** 3.12.14
 
 | Dependency | Version resolved |
