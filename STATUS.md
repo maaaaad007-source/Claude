@@ -5,7 +5,7 @@ exercised against the dependency versions resolved on that date — useful for a
 project whose failures arrive from upstream releases rather than from commits
 here.
 
-- **Last verified:** 2026-10-26
+- **Last verified:** 2026-11-02
 - **Test suite:** passing — 221 passed
 - **Python:** 3.12.15
 
@@ -16,4 +16,4 @@ here.
 | requests | 2.34.2 |
 | beautifulsoup4 | 4.15.0 |
 | lxml | 6.1.3 |
-| pytest | 9.1.1 |
+| pytest | 9.2.0 |
